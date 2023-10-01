@@ -1,0 +1,19 @@
+{
+    "folders":
+    [
+        {
+            "folder_exclude_patterns":
+            [
+                ".cache",
+                ".mypy_cache",
+                ".pytest_cache",
+                "__pycache__"
+            ],
+            "path": "."
+        }
+    ],
+    "settings": {
+        "MypyReveal.executable": "~/.local/share/virtualenvs/youtube-music-playlist-j_JB-odY/bin/mypy",
+        "SublimeLinter.linters.mypy.disable": false,
+    }
+}
