@@ -13,7 +13,6 @@
         }
     ],
     "settings": {
-        "MypyReveal.executable": "~/.local/share/virtualenvs/youtube-music-playlist-j_JB-odY/bin/mypy",
         "SublimeLinter.linters.mypy.disable": false,
     }
 }
