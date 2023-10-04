@@ -119,15 +119,24 @@ def get_playlist_songs(ytmusic: YTMusic, playlists: list['PlaylistSummary']) -> 
     logger = logging.getLogger(__name__)
     existing_songs: set[str] = set()
     for playlist in playlists:
-        count = playlist_count(playlist)
+        playlist_cnt = playlist_count(playlist)
         songs = playlist_songs(ytmusic, playlist['playlistId'])
-        if len(songs) != count:
+        songs_cnt = len(songs)
+        if songs_cnt != playlist_cnt:
             logger.warning(
                 'Failed to fetch all songs from playlist %r %r',
                 playlist['title'],
                 playlist['playlistId'],
             )
+
+        existing_cnt = len(existing_songs)
         existing_songs.update(songs)
+        if existing_cnt + songs_cnt != len(existing_songs):
+            logger.warning(
+                'Dublicate songs from playlist %r %r',
+                playlist['title'],
+                playlist['playlistId'],
+            )
     return existing_songs
 
 
