@@ -15,6 +15,9 @@ if typing.TYPE_CHECKING:
     from ytmusicapi.mixins.library import PlaylistSummary
 
 
+YOUTUBE_PLAYLIST_SIZE = 5_000
+
+
 class ApiError(Exception):
     """Wrapper around error responses from the `ytmusicapi`."""
 
@@ -89,7 +92,7 @@ def create_playlist(ytmusic: YTMusic, indx: int) -> str:
     raise ApiError(ret)
 
 
-def get_everything_playlist(ytmusic: YTMusic) -> list['PlaylistSummary']:
+def get_everything_playlists(ytmusic: YTMusic) -> list['PlaylistSummary']:
     """Finds or creates the 'Everything' Playlist and returns its ID."""
     playlists = ytmusic.get_library_playlists()
     everything_lists = [pl for pl in playlists if pl['title'].startswith('Everything ')]
@@ -102,7 +105,7 @@ def get_next_playlist(
     """Get or create the next playlist that has room for songs."""
     for playlist in playlists:
         count = playlist_count(playlist)
-        if count < 5000:
+        if count < YOUTUBE_PLAYLIST_SIZE:
             yield playlist['playlistId'], count
 
     cnt = len(playlists)
@@ -152,7 +155,7 @@ def update_playlist(ytmusic: YTMusic) -> None:
     all_songs = library_songs(ytmusic)
     logger.info('All Songs in Library: %s', f'{len(all_songs):,}')
 
-    playlists = get_everything_playlist(ytmusic)
+    playlists = get_everything_playlists(ytmusic)
     logger.info('Everything Playlists Count: %r', len(playlists))
 
     existing_songs = get_playlist_songs(ytmusic, playlists)
@@ -165,11 +168,11 @@ def update_playlist(ytmusic: YTMusic) -> None:
     playlist_id, count = next(playlist_generator)
     for chunk in chunk_set(missing_songs):
         count += len(chunk)
-        if count <= 5000:
+        if count <= YOUTUBE_PLAYLIST_SIZE:
             add_songs(ytmusic, playlist_id, chunk)
         else:
             # count remaining songs for playlist
-            offset = 5001 - count
+            offset = YOUTUBE_PLAYLIST_SIZE - count
             # Add remaining songs to current playlist, if there are any
             if offset > 0:
                 add_songs(ytmusic, playlist_id, chunk[:offset])
