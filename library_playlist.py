@@ -161,7 +161,8 @@ def update_playlist(ytmusic: YTMusic) -> None:
     missing_songs = all_songs - existing_songs
     logger.info('Everything playlist is missing %s songs.', f'{len(missing_songs):,}')
 
-    playlist_id, count = next(get_next_playlist(ytmusic, playlists))
+    playlist_generator = get_next_playlist(ytmusic, playlists)
+    playlist_id, count = next(playlist_generator)
     for chunk in chunk_set(missing_songs):
         count += len(chunk)
         if count <= 5000:
@@ -174,7 +175,7 @@ def update_playlist(ytmusic: YTMusic) -> None:
                 add_songs(ytmusic, playlist_id, chunk[:offset])
 
             # Add the rest of the songs to the next playlist
-            playlist_id, count = next(get_next_playlist(ytmusic, playlists))
+            playlist_id, count = next(playlist_generator)
             add_songs(ytmusic, playlist_id, chunk[offset:])
             count += len(chunk[:offset])
 
