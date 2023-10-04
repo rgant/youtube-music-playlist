@@ -27,3 +27,12 @@ have not done so because I still find cases where automatic formatters mangle th
 code. So I use the online sandbox linked above and then ignore some of the
 suggestions that I find ugly. This figures out some better white space solutions
 in python that I cannot always remember so I find it helpful.
+
+## Silly Limits
+
+It appears that YouTube Music will only allow 5,000 songs in a playlist. So in
+order to have all of my music and playlists I will need multiple lists. It also
+seems that Sonos will only load 500 tracks from a playlist that contains 5,000.
+Possibly by using [SoCo library](https://soco.readthedocs.io/en/latest/api/soco.core.html)
+I might be able to add more tracks to the queue manually. I believe I've seen
+online that the maximum Sonnos queue size is 40,000 tracks.
