@@ -8,9 +8,9 @@ ytmusicapi = "*"
 
 [dev-packages]
 mypy = "*"
+pyenchant = "*"
 pylint = "*"
 types-requests = "*"
-pyenchant = "*"
 
 [requires]
-python_version = "3.11"
+python_version = "3.12"

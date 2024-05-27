@@ -6,7 +6,7 @@ These types were generated automatically using commands like:
 pipenv run stubgen -p ytmusicapi
 ```
 
-And then copying the files generated to `./stubs/` from `./out/` (where `stubgen`
+And then copying the files generated to `./typings/` from `./out/` (where `stubgen`
 puts the stubs by default.)
 
 This is a terrible example of python stubs. I filled in only those parts that I
