@@ -10,7 +10,7 @@ do that and I want to listen to everything on my Sonos 1 device.
 pipenv run ytmusicapi oauth
 ```
 
-And follow instructions. This command should create a oauth.json file in the
+And follow instructions. This command should create a `oauth.json` file in the
 current directory that can be used by `ytmusicapi` to modify my YouTube Music
 account.
 
@@ -19,7 +19,7 @@ account.
 Use [Black](https://black.vercel.app/?version=stable&state=_Td6WFoAAATm1rRGAgAhARYAAAB0L-Wj4ABrAEddAD2IimZxl1N_W1ktIvcnCRywToX8gFKcWutDOwKKLKrASR9hIKEm62fqgvXlOZubtjviIJdrWHeOg9Eh_fA8IcOitKvsHsAAAADHH5AiHeIXpAABY2w8oFIqH7bzfQEAAAAABFla)
 to format python code files. Settings should target the "stable" version, a line
 length of 100 characters, python version 3.10+, "Don't normalize string quotes or
-prefixes" (I prefer """Docstrings""" and 'single quoted' string values.), and
+prefixes" (I prefer `"""Docstrings"""` and 'single quoted' string values.), and
 "Format typing stubs" options.
 
 Although it is possible to setup your editor to automatically format the code I
@@ -35,4 +35,4 @@ order to have all of my music and playlists I will need multiple lists. It also
 seems that Sonos will only load 500 tracks from a playlist that contains 5,000.
 Possibly by using [SoCo library](https://soco.readthedocs.io/en/latest/api/soco.core.html)
 I might be able to add more tracks to the queue manually. I believe I've seen
-online that the maximum Sonnos queue size is 40,000 tracks.
+online that the maximum Sonos queue size is 40,000 tracks.

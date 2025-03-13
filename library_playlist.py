@@ -29,6 +29,9 @@ def add_songs(ytmusic: YTMusic, playlist_id: str, songs: list[str]) -> None:
     logger = logging.getLogger(__name__)
     logger.info('Adding Songs %d', len(songs))
     logger.debug('Song Ids %r', songs)
+
+    # Throws a plain Exception
+    # Exception: Server returned HTTP 400: Bad Request. Maximum playlist size exceeded.
     ytmusic.add_playlist_items(playlist_id, songs)
 
 
