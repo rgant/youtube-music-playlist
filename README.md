@@ -6,7 +6,12 @@ do that and I want to listen to everything on my Sonos 1 device.
 
 ## Login to YouTube Music
 
+Oauth is now super annoying to setup requiring a Google organization. The
+information that will be requested by `ytmusicapi` can be found in
+`./client_secret.apps.googleusercontent.com.json`
+
 ```sh
+# After copying the headers
 pipenv run ytmusicapi oauth
 ```
 

@@ -4,20 +4,21 @@ Download all songs in my YouTube Music Library.
 Create "Everything #" playlists as needed.
 Add any songs from the library that are not in a playlist already.
 """
+from collections.abc import Generator
+import json
 import logging
 import os
 import sys
 import typing
 
-from ytmusicapi import YTMusic
+from ytmusicapi import OAuthCredentials, YTMusic
 
 from common.logger import create_handler
 
-if typing.TYPE_CHECKING:
-    from ytmusicapi.mixins.library import PlaylistSummary
+Json = dict[str, dict[str, 'Json'] | list['Json'] | str | int | float | bool | None]
 
 
-YOUTUBE_PLAYLIST_SIZE = 5_000
+YOUTUBE_PLAYLIST_SIZE = 500  # Maximum size that Sonos 1 will import
 
 
 class ApiError(Exception):
@@ -32,10 +33,10 @@ def add_songs(ytmusic: YTMusic, playlist_id: str, songs: list[str]) -> None:
 
     # Throws a plain Exception
     # Exception: Server returned HTTP 400: Bad Request. Maximum playlist size exceeded.
-    ytmusic.add_playlist_items(playlist_id, songs)
+    _ = ytmusic.add_playlist_items(playlist_id, songs)
 
 
-def chunk_set(songs: set[str]) -> typing.Generator[list[str], None, None]:
+def chunk_set(songs: set[str]) -> Generator[list[str], None, None]:
     """Batch set of missing song ids for API."""
     step = 25
     song_ids = list(songs)
@@ -45,33 +46,37 @@ def chunk_set(songs: set[str]) -> typing.Generator[list[str], None, None]:
 
 def create_playlist(ytmusic: YTMusic, indx: int) -> str:
     """Create a new Everything playlist."""
+    logger = logging.getLogger(__name__)
+    title = f'Everything {indx}'
     ret = ytmusic.create_playlist(
-        title=f'Everything {indx}',
+        title=title,
         description='Every song in my library',
         privacy_status='PRIVATE',
     )
     if isinstance(ret, str):
+        logger.info('Created playlist %r', title)
         return ret
 
-    logger = logging.getLogger(__name__)
     logger.error('Failed to create Everything playlist\n%r', ret)
     raise ApiError(ret)
 
 
 def get_everything_playlists(ytmusic: YTMusic) -> list['PlaylistSummary']:
     """Finds or creates the 'Everything' Playlist and returns its ID."""
-    playlists = ytmusic.get_library_playlists()
+    playlists = ytmusic.get_library_playlists(limit=None)
     everything_lists = [pl for pl in playlists if pl['title'].startswith('Everything ')]
     return everything_lists
 
 
 def get_next_playlist(
     ytmusic: YTMusic, playlists: list['PlaylistSummary']
-) -> typing.Generator[tuple[str, int], None, None]:
+) -> Generator[tuple[str, int], None, None]:
     """Get or create the next playlist that has room for songs."""
+    logger = logging.getLogger(__name__)
     for playlist in playlists:
         count = playlist_count(playlist)
         if count < YOUTUBE_PLAYLIST_SIZE:
+            logger.info('Adding songs to %r', playlist['title'])
             yield playlist['playlistId'], count
 
     cnt = len(playlists)
@@ -99,7 +104,7 @@ def get_playlist_songs(ytmusic: YTMusic, playlists: list['PlaylistSummary']) -> 
         existing_songs.update(songs)
         if existing_cnt + songs_cnt != len(existing_songs):
             logger.warning(
-                'Dublicate songs from playlist %r %r',
+                'Duplicate songs from playlist %r %r',
                 playlist['title'],
                 playlist['playlistId'],
             )
@@ -108,7 +113,9 @@ def get_playlist_songs(ytmusic: YTMusic, playlists: list['PlaylistSummary']) -> 
 
 def library_songs(ytmusic: YTMusic) -> set[str]:
     """Fetch every song in my library except 'Radio Edit's."""
-    songs = ytmusic.get_library_songs(limit=None)
+    # Need to have a limit or else validate_responses won't work. So pick a number bigger than the
+    # library size of 16,617
+    songs = ytmusic.get_library_songs(limit=20_000, validate_responses=True)
     return {s['videoId'] for s in songs if 'radio edit' not in s['title'].lower()}
 
 
@@ -146,30 +153,46 @@ def update_playlist(ytmusic: YTMusic) -> None:
         if count <= YOUTUBE_PLAYLIST_SIZE:
             add_songs(ytmusic, playlist_id, chunk)
         else:
+            logger.debug('Current Count: %r', count)
             # count remaining songs for playlist
             offset = YOUTUBE_PLAYLIST_SIZE - count
+            logger.debug('Offset: %r', offset)
             # Add remaining songs to current playlist, if there are any
             if offset > 0:
+                logger.debug('Adding: %r to current playlist', len(chunk[:offset]))
                 add_songs(ytmusic, playlist_id, chunk[:offset])
 
             # Add the rest of the songs to the next playlist
             playlist_id, count = next(playlist_generator)
+            logger.debug('Created new playlist, count: %r', count)
             add_songs(ytmusic, playlist_id, chunk[offset:])
-            count += len(chunk[:offset])
+            logger.debug('Added %r songs to new playlist', len(chunk[offset:]))
+            count += len(chunk[offset:])
+            logger.debug('New Playlist Count: %r', count)
 
 
 def main() -> None:
     """Connect to YouTube Music and sync the songs in my library to the Everything playlist."""
     logger = logging.getLogger(__name__)
-    if os.path.isfile('oauth.json'):
-        ytmusic = YTMusic('oauth.json')
-        update_playlist(ytmusic)
-    else:
+    if not os.path.isfile('oauth.json'):
         logger.error('Missing YouTube OAuth JSON file')
+
+    with open('client_secret.apps.googleusercontent.com.json', encoding='utf-8') as handle:
+        wrapper = typing.cast(Json, json.load(handle))
+        client_secret = wrapper['installed']
+        assert isinstance(client_secret, dict)
+
+        credentials = OAuthCredentials(
+            client_id=client_secret['client_id'], client_secret=client_secret['client_secret']
+        )
+
+    ytmusic = YTMusic('oauth.json', oauth_credentials=credentials)
+    update_playlist(ytmusic)
 
 
 if __name__ == '__main__':
     logging.basicConfig(handlers=[create_handler()], level=logging.INFO)
+    logging.getLogger(__name__).setLevel(logging.DEBUG)
     try:
         main()
     except KeyboardInterrupt:
