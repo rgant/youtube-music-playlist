@@ -16,6 +16,32 @@ from ytmusicapi import OAuthCredentials, YTMusic
 from common.logger import create_handler
 
 Json = dict[str, dict[str, 'Json'] | list['Json'] | str | int | float | bool | None]
+Identifier = typing.TypedDict(
+    'Identifier',
+    {
+        'id': str,
+        'name': str,
+    },
+)
+Thumbnail = typing.TypedDict(
+    'Thumbnail',
+    {
+        'height': int,
+        'url': str,
+        'width': int,
+    },
+)
+Playlist = typing.TypedDict(
+    'Playlist',
+    {
+        'author': typing.NotRequired[list[Identifier]],
+        'count': typing.NotRequired[str],
+        'description': str,
+        'playlistId': str,
+        'thumbnails': list[Thumbnail],
+        'title': str,
+    },
+)
 
 
 YOUTUBE_PLAYLIST_SIZE = 500  # Maximum size that Sonos 1 will import
@@ -61,15 +87,15 @@ def create_playlist(ytmusic: YTMusic, indx: int) -> str:
     raise ApiError(ret)
 
 
-def get_everything_playlists(ytmusic: YTMusic) -> list['PlaylistSummary']:
+def get_everything_playlists(ytmusic: YTMusic) -> list[Playlist]:
     """Finds or creates the 'Everything' Playlist and returns its ID."""
     playlists = ytmusic.get_library_playlists(limit=None)
     everything_lists = [pl for pl in playlists if pl['title'].startswith('Everything ')]
-    return everything_lists
+    return typing.cast(list[Playlist], everything_lists)
 
 
 def get_next_playlist(
-    ytmusic: YTMusic, playlists: list['PlaylistSummary']
+    ytmusic: YTMusic, playlists: list[Playlist]
 ) -> Generator[tuple[str, int], None, None]:
     """Get or create the next playlist that has room for songs."""
     logger = logging.getLogger(__name__)
@@ -85,7 +111,7 @@ def get_next_playlist(
         yield create_playlist(ytmusic, cnt), 0
 
 
-def get_playlist_songs(ytmusic: YTMusic, playlists: list['PlaylistSummary']) -> set[str]:
+def get_playlist_songs(ytmusic: YTMusic, playlists: list[Playlist]) -> set[str]:
     """Get Song IDs for all playlists."""
     logger = logging.getLogger(__name__)
     existing_songs: set[str] = set()
@@ -119,7 +145,7 @@ def library_songs(ytmusic: YTMusic) -> set[str]:
     return {s['videoId'] for s in songs if 'radio edit' not in s['title'].lower()}
 
 
-def playlist_count(playlist: 'PlaylistSummary') -> int:
+def playlist_count(playlist: Playlist) -> int:
     """Convert Playlist count string to integer."""
     return int(playlist.get('count', '0').replace(',', ''))
 
@@ -181,6 +207,8 @@ def main() -> None:
         wrapper = typing.cast(Json, json.load(handle))
         client_secret = wrapper['installed']
         assert isinstance(client_secret, dict)
+        assert isinstance(client_secret['client_id'], str)
+        assert isinstance(client_secret['client_secret'], str)
 
         credentials = OAuthCredentials(
             client_id=client_secret['client_id'], client_secret=client_secret['client_secret']

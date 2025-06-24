@@ -38,6 +38,4 @@ in python that I cannot always remember so I find it helpful.
 It appears that YouTube Music will only allow 5,000 songs in a playlist. So in
 order to have all of my music and playlists I will need multiple lists. It also
 seems that Sonos will only load 500 tracks from a playlist that contains 5,000.
-Possibly by using [SoCo library](https://soco.readthedocs.io/en/latest/api/soco.core.html)
-I might be able to add more tracks to the queue manually. I believe I've seen
-online that the maximum Sonos queue size is 40,000 tracks.
+So that it ends up being the limit.
