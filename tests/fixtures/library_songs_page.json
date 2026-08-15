@@ -1,0 +1,30 @@
+[
+  {
+    "videoId": "LIB_VIDEO_AAAAAAAAAA",
+    "title": "Alright Already",
+    "artists": [
+      { "id": "UC_FITZ", "name": "Fitz and The Tantrums" }
+    ]
+  },
+  {
+    "videoId": "LIB_VIDEO_BBBBBBBBBB",
+    "title": "Undercover Angel",
+    "artists": [
+      { "id": "UC_BURGERS", "name": "Bob's Burgers" },
+      { "id": "UC_MURPHY", "name": "Larry Murphy" },
+      { "id": "UC_BENJAMIN", "name": "H. Jon Benjamin" }
+    ]
+  },
+  {
+    "videoId": "LIB_VIDEO_CCCCCCCCCC",
+    "title": "Baditude (Radio Edit)",
+    "artists": [
+      { "id": "UC_SILENCERS", "name": "The Silencers" }
+    ]
+  },
+  {
+    "videoId": "LIB_VIDEO_DDDDDDDDDD",
+    "title": "Untitled Instrumental",
+    "artists": []
+  }
+]

@@ -3,12 +3,21 @@ root = true
 
 [*]
 charset = utf-8
+indent_style = space
+indent_size = 2
 insert_final_newline = true
+max_line_length = 140
 trim_trailing_whitespace = true
 
 [*.py]
-max_line_length = 100
+indent_size = 4
+quote_type = double
 
 [*.md]
 max_line_length = 80
-trim_trailing_whitespace = false
+
+[*.sh]
+indent_style = tab
+# shfmt: use bash dialect, allow redirects after commands (e.g. cmd 2>&1)
+shell_variant = bash
+binary_next_line = true

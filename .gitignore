@@ -163,7 +163,9 @@ cython_debug/
 # Mac stuff
 .DS_Store
 
-# ytmusicapi OAuth JSON
-oauth.json
-browser.json
+# Credentials. The trailing * covers browser.json.new, which `library-radio auth`
+# writes and then removes. A crash between those two steps must not leave live
+# cookies in a file that git tracks.
+oauth.json*
+browser.json*
 client_secret*.apps.googleusercontent.com.json

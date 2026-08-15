@@ -1,0 +1,30 @@
+{
+  "kind": "youtube#playlistListResponse",
+  "nextPageToken": "PLAYLISTS_PAGE_2",
+  "items": [
+    {
+      "id": "PL_EVERYTHING_1",
+      "snippet": {
+        "title": "Everything 1"
+      }
+    },
+    {
+      "id": "PL_EVERYTHING_2",
+      "snippet": {
+        "title": "Everything 2"
+      }
+    },
+    {
+      "id": "PL_EVERYTHING_ELSE",
+      "snippet": {
+        "title": "EverythingElse"
+      }
+    },
+    {
+      "id": "PL_LIKED_MUSIC",
+      "snippet": {
+        "title": "Liked Music"
+      }
+    }
+  ]
+}

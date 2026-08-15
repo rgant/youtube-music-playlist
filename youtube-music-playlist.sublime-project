@@ -7,12 +7,15 @@
                 ".cache",
                 ".mypy_cache",
                 ".pytest_cache",
-                "__pycache__"
+                ".ruff_cache",
+                ".superpowers",
+                ".venv",
+                "__pycache__",
             ],
-            "path": "."
-        }
+            "path": ".",
+        },
     ],
     "settings": {
         "SublimeLinter.linters.mypy.disable": false,
-    }
+    },
 }

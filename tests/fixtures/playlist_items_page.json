@@ -1,0 +1,20 @@
+{
+  "kind": "youtube#playlistItemListResponse",
+  "items": [
+    {
+      "contentDetails": {
+        "videoId": "VIDEO_AAAAAAAAAAA"
+      }
+    },
+    {
+      "contentDetails": {
+        "videoId": "VIDEO_BBBBBBBBBBB"
+      }
+    },
+    {
+      "contentDetails": {
+        "videoId": "VIDEO_CCCCCCCCCCC"
+      }
+    }
+  ]
+}
