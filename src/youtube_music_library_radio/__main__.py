@@ -1,12 +1,18 @@
 """The `library-radio` command line: the one place that wires every module of this project together.
 
-The subcommands are `bootstrap`, `auth`, `refresh`, `stop`, and `status`.
+The subcommands are `serve`, `bootstrap`, `auth`, `refresh`, `play`, `stop`, and `status`.
 
+- `serve` runs the station and blocks. launchd runs this one.
 - `bootstrap` fills an empty catalogue from the owner's `Everything N` YouTube playlists.
 - `auth` writes the browser headers file, then reads the library to verify it.
 - `refresh` merges the live YouTube Music library into the catalogue.
+- `play` points the speaker at the station.
 - `stop` stops the speaker.
 - `status` reports the catalogue row count and the transport state of the speaker.
+
+`serve` starts no thread that watches the speaker, and it restarts no playback. Read the module
+docstring of `control.py` for the reason. launchd restarts the process after a crash, which is a
+different thing. It recovers this program, and it holds no view on what the speaker plays.
 
 Every subcommand returns 0 after success and a non-zero value after a failure. `main` turns an
 expected failure into that non-zero value and one log line, so a person sees the fault and not a
@@ -29,10 +35,12 @@ from ytmusicapi import YTMusic, setup
 from youtube_music_library_radio.authheaders import CURL_INSTRUCTIONS, MissingHeadersError, normalise
 from youtube_music_library_radio.bootstrap import CredentialError, access_token, bootstrap
 from youtube_music_library_radio.catalogue import count_songs, open_catalogue
-from youtube_music_library_radio.control import find_speaker, stop, transport_state
+from youtube_music_library_radio.control import find_speaker, start, station_url, stop, transport_state
 from youtube_music_library_radio.logger import create_handler
 from youtube_music_library_radio.refresh import library_songs, refresh
+from youtube_music_library_radio.resolver import resolve
 from youtube_music_library_radio.settings import load_settings
+from youtube_music_library_radio.station import build_server
 
 if typing.TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -61,14 +69,47 @@ _DEFAULT_HEADERS_PATH = Path("browser.json")
 _AUTH_PROBE_LIMIT = 25
 
 
-def _stop_station(settings: Settings) -> None:  # pragma: no cover -- reaches the speaker. A live run proves it
+def _run_station(settings: Settings, conn: sqlite3.Connection) -> None:  # pragma: no cover -- binds a port. Task 11 proves it
+    """Serve the endless stream until the process stops.
+
+    `build_server` refuses an empty catalogue and a `PATH` that holds no `ffmpeg`, before it binds
+    the port.
+    """
+    with build_server(settings, conn, resolve) as server:
+        _logger.info("the station serves port %d from the catalogue at %s", settings.station_port, settings.database_path)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            _logger.info("the station stops")
+
+
+def _start_station(settings: Settings) -> None:  # pragma: no cover -- reaches the speaker. Task 11 proves it
+    """Point the speaker at the station.
+
+    Discovery takes about five seconds. This finds the speaker one time and passes it to
+    `station_url`, which needs the speaker's address when `YTM_RADIO_STATION_HOST` is empty.
+    """
+    speaker = find_speaker(settings.speaker_name)
+    start(speaker, station_url(settings, speaker=speaker), settings.station_name)
+
+
+def _stop_station(settings: Settings) -> None:  # pragma: no cover -- reaches the speaker. Task 11 proves it
     """Stop the speaker named in `settings`."""
     stop(find_speaker(settings.speaker_name))
 
 
-def _speaker_state(settings: Settings) -> str:  # pragma: no cover -- reaches the speaker. A live run proves it
+def _speaker_state(settings: Settings) -> str:  # pragma: no cover -- reaches the speaker. Task 11 proves it
     """Return the transport state of the speaker named in `settings`."""
     return transport_state(find_speaker(settings.speaker_name))
+
+
+def _serve(args: argparse.Namespace, *, run_fn: Callable[[Settings, sqlite3.Connection], None] = _run_station) -> int:
+    """Open the catalogue and serve the station. Returns when the station stops."""
+    del args
+    settings = load_settings()
+    with contextlib.closing(open_catalogue(settings.database_path)) as conn:
+        run_fn(settings, conn)
+    return 0
 
 
 def _bootstrap(
@@ -151,7 +192,8 @@ def _auth(
     The new headers go to `<headers>.new` first, and reach `headers_path` only after the read
     returns songs. A person runs `auth` when authentication is in doubt, and the headers they paste
     can be wrong. A write straight onto `headers_path` destroys a working credential before anything
-    checks the new one, and the person then holds nothing that works.
+    checks the new one, and the person then holds nothing that works. `render_plist` in
+    `scripts/install_launchagent.sh` follows the same shape, for the same reason.
 
     The temporary file sits beside `headers_path`, never under `TMPDIR`. `Path.replace` is atomic on
     one filesystem alone, and a rename across two can fail part way. A failed read deletes the
@@ -209,6 +251,15 @@ def _refresh(args: argparse.Namespace, *, refresh_fn: Callable[[sqlite3.Connecti
     return 0
 
 
+def _play(args: argparse.Namespace, *, start_fn: Callable[[Settings], None] = _start_station) -> int:
+    """Point the speaker at the station."""
+    del args
+    settings = load_settings()
+    start_fn(settings)
+    _logger.info("the speaker %s plays the station", settings.speaker_name)
+    return 0
+
+
 def _stop(args: argparse.Namespace, *, stop_fn: Callable[[Settings], None] = _stop_station) -> int:
     """Stop the speaker."""
     del args
@@ -240,9 +291,11 @@ def _status(args: argparse.Namespace, *, state_fn: Callable[[Settings], str] = _
 
 
 _HANDLERS: dict[str, _Handler] = {
+    "serve": _serve,
     "bootstrap": _bootstrap,
     "auth": _auth,
     "refresh": _refresh,
+    "play": _play,
     "stop": _stop,
     "status": _status,
 }
@@ -253,16 +306,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     The credential options default to the file names the repository root already holds. They are
     per-invocation inputs to `bootstrap`, `auth`, and `refresh`, not service configuration, so they
-    stay off `Settings`. `stop` and `status` need none of them.
+    stay off `Settings`. `serve` needs none of them, and launchd runs `serve` alone.
 
     `auth` and `refresh` share the `--headers` default, because `auth` writes the file that
     `refresh` reads. A different default on one of them writes one file and reads another.
     """
     parser = argparse.ArgumentParser(
         prog="library-radio",
-        description="Keep a catalogue of the owner's YouTube Music library, and command a Sonos speaker.",
+        description="Stream the owner's YouTube Music library to a Sonos speaker as an endless radio station.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="SUBCOMMAND")
+
+    _ = subparsers.add_parser("serve", help="serve the endless stream and block. launchd runs this one")
 
     bootstrap_parser = subparsers.add_parser("bootstrap", help="fill an empty catalogue from the Everything N playlists")
     _ = bootstrap_parser.add_argument("--oauth", type=Path, default=_DEFAULT_OAUTH_PATH, help="the OAuth token file")
@@ -289,6 +344,7 @@ def build_parser() -> argparse.ArgumentParser:
             help="the browser headers file that `library-radio auth` writes",
         )
 
+    _ = subparsers.add_parser("play", help="point the speaker at the station")
     _ = subparsers.add_parser("stop", help="stop the speaker")
     _ = subparsers.add_parser("status", help="report the catalogue row count and the transport state")
 

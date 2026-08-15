@@ -32,9 +32,9 @@ def _block_real_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail a test that reaches the real `soco.discover`, instead of blocking on real multicast.
 
     This applies to every unit test, and not to `test_control.py` alone. A future test can call
-    `find_speaker` with no `discover_fn` of its own. Without this fixture, that test touches the
-    network for five seconds per call, and it never fails fast. This project allows no network in a
-    unit test.
+    `find_speaker` or `station_url` with no `discover_fn` of its own. Without this fixture, that
+    test touches the network for five seconds per call, and it never fails fast. This project
+    allows no network in a unit test.
     """
 
     def _blocked(*_args: object, **_kwargs: object) -> None:

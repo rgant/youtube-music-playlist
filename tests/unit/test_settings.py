@@ -21,28 +21,33 @@ def test_defaults_match_the_documented_values() -> None:
     settings = load_settings()
 
     assert settings.speaker_name == "Kitchen"
+    assert settings.station_host == ""
+    assert settings.station_port == 8900
+    assert settings.bitrate_kbps == 128
     assert settings.no_repeat_window == 2000
     assert settings.prune_threshold == 3
+    assert settings.metadata_interval == 16000
+    assert settings.station_name == "My Library Radio"
 
 
 def test_environment_overrides_a_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`YTM_RADIO_SPEAKER_NAME` overrides the default `speaker_name`."""
-    monkeypatch.setenv("YTM_RADIO_SPEAKER_NAME", "Office")
+    """`YTM_RADIO_STATION_PORT` overrides the default `station_port`."""
+    monkeypatch.setenv("YTM_RADIO_STATION_PORT", "9100")
 
     settings = load_settings()
 
-    assert settings.speaker_name == "Office"
+    assert settings.station_port == 9100
 
 
-def test_settings_reject_a_value_that_is_not_a_whole_number(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`load_settings` raises naming the field and its environment variable when the value is not a number.
+def test_settings_reject_a_station_port_that_is_not_a_whole_number(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`load_settings` raises naming `station_port` and its environment variable when the value is not a number.
 
     Every integer setting shares one reader. The bare `int()` error names the text alone and names
     no setting, so it fits every one of them.
     """
-    monkeypatch.setenv("YTM_RADIO_NO_REPEAT_WINDOW", "two thousand")
+    monkeypatch.setenv("YTM_RADIO_STATION_PORT", "eight")
 
-    with pytest.raises(ValueError, match=r"no_repeat_window.*YTM_RADIO_NO_REPEAT_WINDOW"):
+    with pytest.raises(ValueError, match=r"station_port.*YTM_RADIO_STATION_PORT"):
         _ = load_settings()
 
 
@@ -86,3 +91,35 @@ def test_settings_accept_a_prune_threshold_of_one(monkeypatch: pytest.MonkeyPatc
     settings = load_settings()
 
     assert settings.prune_threshold == 1
+
+
+def test_settings_reject_a_metadata_interval_below_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`load_settings` raises naming `metadata_interval` and its environment variable when the value is below one."""
+    monkeypatch.setenv("YTM_RADIO_METADATA_INTERVAL", "0")
+
+    with pytest.raises(ValueError, match=r"metadata_interval.*YTM_RADIO_METADATA_INTERVAL"):
+        _ = load_settings()
+
+
+def test_settings_reject_a_bitrate_kbps_below_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`load_settings` raises naming `bitrate_kbps` and its environment variable when the value is below one."""
+    monkeypatch.setenv("YTM_RADIO_BITRATE_KBPS", "0")
+
+    with pytest.raises(ValueError, match=r"bitrate_kbps.*YTM_RADIO_BITRATE_KBPS"):
+        _ = load_settings()
+
+
+def test_settings_reject_a_station_port_below_the_valid_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`load_settings` raises naming `station_port` and its environment variable when the port is below 1."""
+    monkeypatch.setenv("YTM_RADIO_STATION_PORT", "0")
+
+    with pytest.raises(ValueError, match=r"station_port.*YTM_RADIO_STATION_PORT"):
+        _ = load_settings()
+
+
+def test_settings_reject_a_station_port_above_the_valid_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`load_settings` raises naming `station_port` and its environment variable when the port is above 65535."""
+    monkeypatch.setenv("YTM_RADIO_STATION_PORT", "65536")
+
+    with pytest.raises(ValueError, match=r"station_port.*YTM_RADIO_STATION_PORT"):
+        _ = load_settings()

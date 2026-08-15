@@ -7,27 +7,40 @@ from pathlib import Path
 _PREFIX = "YTM_RADIO_"
 _DEFAULT_DATABASE_PATH = Path("~/.local/share/youtube-music-library-radio/catalogue.sqlite3").expanduser()
 
+_MIN_PORT = 1
+_MAX_PORT = 65535
+
 
 @dataclasses.dataclass(frozen=True)
 class Settings:
-    """Runtime configuration for this project.
+    """Runtime configuration for the radio service.
 
-    `__post_init__` rejects a `no_repeat_window` below zero and a `prune_threshold` below one.
-    `candidate_songs` reads a window of zero or less as "exclude nothing", so a negative value hides
-    the owner's mistake instead of reporting it. A `prune_threshold` below one deletes a song on its
-    first failure. One clear error at start-up is easier to correct than the downstream failure each
-    fault causes minutes or hours later.
+    `__post_init__` rejects a `no_repeat_window` below zero, a `prune_threshold` below one, a
+    `metadata_interval` below one, a `bitrate_kbps` below one, and a `station_port` outside 1 to
+    65535. A negative `no_repeat_window` silences the radio. A negative `metadata_interval` plays
+    static. One clear error at start-up is easier to correct than the downstream failure each fault
+    causes minutes or hours later.
     """
 
     database_path: Path
     speaker_name: str
+    station_host: str
+    station_port: int
+    bitrate_kbps: int
     no_repeat_window: int
     prune_threshold: int
+    metadata_interval: int
+    station_name: str
 
     def __post_init__(self) -> None:
-        """Reject a value the rest of the project cannot act on."""
+        """Reject a value that silences the radio, plays static, or binds no usable port."""
         _require_at_least(self.no_repeat_window, 0, "no_repeat_window", "NO_REPEAT_WINDOW")
         _require_at_least(self.prune_threshold, 1, "prune_threshold", "PRUNE_THRESHOLD")
+        _require_at_least(self.metadata_interval, 1, "metadata_interval", "METADATA_INTERVAL")
+        _require_at_least(self.bitrate_kbps, 1, "bitrate_kbps", "BITRATE_KBPS")
+        if not _MIN_PORT <= self.station_port <= _MAX_PORT:
+            message = f"station_port must be between {_MIN_PORT} and {_MAX_PORT}, not {self.station_port}; set {_PREFIX}STATION_PORT"
+            raise ValueError(message)
 
 
 def _require_at_least(value: int, minimum: int, field: str, env_suffix: str) -> None:
@@ -67,6 +80,11 @@ def load_settings() -> Settings:
     return Settings(
         database_path=database_path,
         speaker_name=_env_str("SPEAKER_NAME", "Kitchen"),
+        station_host=_env_str("STATION_HOST", ""),
+        station_port=_env_int("STATION_PORT", 8900),
+        bitrate_kbps=_env_int("BITRATE_KBPS", 128),
         no_repeat_window=_env_int("NO_REPEAT_WINDOW", 2000),
         prune_threshold=_env_int("PRUNE_THRESHOLD", 3),
+        metadata_interval=_env_int("METADATA_INTERVAL", 16000),
+        station_name=_env_str("STATION_NAME", "My Library Radio"),
     )

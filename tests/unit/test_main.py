@@ -1,8 +1,8 @@
 """Tests for youtube_music_library_radio.__main__.
 
-No test reaches the speaker or the network. Every subcommand handler takes the work that leaves this
-machine as a keyword-only callable, and most tests pass a fake for it. Each fake can raise as well
-as return, so a test can prove the failure path and not the success path alone.
+No test reaches the speaker, the network, or `ffmpeg`. Every subcommand handler takes the work that
+leaves this machine as a keyword-only callable, and most tests pass a fake for it. Each fake can
+raise as well as return, so a test can prove the failure path and not the success path alone.
 
 `main` is exercised through its `handlers` parameter, which replaces the whole handler table. That
 covers the routing from an argument list to a handler. The handlers themselves are called directly,
@@ -33,7 +33,9 @@ from youtube_music_library_radio.__main__ import (
     _auth,
     _bootstrap,
     _credential_text,
+    _play,
     _refresh,
+    _serve,
     _status,
     _stop,
     main,
@@ -49,7 +51,7 @@ if typing.TYPE_CHECKING:
     from youtube_music_library_radio.jsonshape import JSON
     from youtube_music_library_radio.settings import Settings
 
-_SUBCOMMANDS = ["bootstrap", "auth", "refresh", "stop", "status"]
+_SUBCOMMANDS = ["serve", "bootstrap", "auth", "refresh", "play", "stop", "status"]
 
 
 @pytest.fixture(autouse=True)
@@ -221,8 +223,8 @@ def test_each_subcommand_is_registered() -> None:
     """The parser accepts every subcommand, and `main` routes each one to the handler of that name.
 
     The last assertion reads the handler behind each key, and not the key set alone. A key set holds
-    no evidence that `stop` reaches `_stop`. Two swapped values leave the key set equal, and
-    `library-radio status` then stops the speaker.
+    no evidence that `play` reaches `_play`. Two swapped values leave the key set equal, and
+    `library-radio play` then stops the speaker.
 
     It derives the expected mapping from the naming rule `_HANDLERS` already follows: the handler
     for `name` is `_name`. A new subcommand in `_SUBCOMMANDS` and `_HANDLERS` therefore needs no
@@ -272,6 +274,31 @@ def test_status_reports_the_row_count_when_the_speaker_is_missing(catalogue_path
     assert code != 0
     assert "holds 2 songs" in caplog.text
     assert "Kitchen" in caplog.text
+
+
+def test_serve_gives_the_station_an_open_catalogue(catalogue_path: Path) -> None:
+    """`serve` opens the catalogue, hands it to the station, and returns zero once the station ends."""
+    _seed(catalogue_path, 4)
+    seen: list[tuple[Path, int]] = []
+
+    def _run(settings: Settings, conn: sqlite3.Connection) -> None:
+        seen.append((settings.database_path, count_songs(conn)))
+
+    code = _serve(_args("serve"), run_fn=_run)
+
+    assert code == 0
+    assert seen == [(catalogue_path, 4)]
+
+
+def test_serve_returns_non_zero_when_the_station_refuses_to_start(catalogue_path: Path) -> None:
+    """`serve` reports the failure of the station as a non-zero code, not as a traceback."""
+    _seed(catalogue_path, 1)
+
+    def _refuse(_settings: Settings, _conn: sqlite3.Connection) -> None:
+        message = "ffmpeg is not on PATH; install it with `brew bundle`"
+        raise RuntimeError(message)
+
+    assert main(["serve"], handlers={"serve": lambda args: _serve(args, run_fn=_refuse)}) != 0
 
 
 def test_bootstrap_reports_the_rows_it_added(catalogue_path: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -415,6 +442,19 @@ def test_refresh_returns_non_zero_when_the_library_reads_empty(
     assert _rows(catalogue_path) == 1
 
 
+def test_play_points_the_speaker_at_the_station() -> None:
+    """`play` starts the station on the speaker named in the settings, and returns zero."""
+    started: list[str] = []
+
+    def _start(settings: Settings) -> None:
+        started.append(settings.speaker_name)
+
+    code = _play(_args("play"), start_fn=_start)
+
+    assert code == 0
+    assert started == ["Kitchen"]
+
+
 def test_stop_stops_the_speaker() -> None:
     """`stop` stops the speaker named in the settings, and returns zero."""
     stopped: list[str] = []
@@ -488,13 +528,13 @@ def test_a_setting_outside_its_range_returns_non_zero(caplog: pytest.LogCaptureF
     `load_settings` runs before `_status` reaches the catalogue or the speaker, so the bad value
     stops the subcommand at its first line.
     """
-    monkeypatch.setenv("YTM_RADIO_PRUNE_THRESHOLD", "0")
+    monkeypatch.setenv("YTM_RADIO_STATION_PORT", "0")
 
     with caplog.at_level(logging.ERROR):
         code = main(["status"])
 
     assert code != 0
-    assert "YTM_RADIO_PRUNE_THRESHOLD" in caplog.text
+    assert "YTM_RADIO_STATION_PORT" in caplog.text
 
 
 def test_the_credential_options_default_to_the_repository_file_names() -> None:

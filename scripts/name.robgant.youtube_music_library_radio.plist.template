@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>name.robgant.youtube_music_library_radio</string>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_DIR__</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>__REPO_DIR__/.venv/bin/library-radio</string>
+      <string>serve</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <!-- launchd gives a process a minimal PATH. `station.find_ffmpeg` reads PATH, so the
+           Homebrew bin directory must be on it. `install_launchagent.sh` asks `brew --prefix`
+           for that directory, because the Intel prefix and the arm64 prefix differ. -->
+      <key>PATH</key>
+      <string>__REPO_DIR__/.venv/bin:__HOMEBREW_BIN__:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/radio.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/radio.stderr.log</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- KeepAlive restarts the service after a crash. The station is a passive server, so a
+         restart recovers this process alone. It starts no playback on the speaker. -->
+    <key>KeepAlive</key>
+    <true/>
+  </dict>
+</plist>

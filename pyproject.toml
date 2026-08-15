@@ -12,6 +12,7 @@ authors = [ { name = "J Rob Gant", email = "rgant@alum.wpi.edu" } ]
 requires-python = ">=3.14"
 dependencies = [
   "soco>=0.31.2",
+  "yt-dlp>=2026.7.4",
   "ytmusicapi>=1.12.2",
 ]
 [project.scripts]
@@ -31,6 +32,7 @@ dev = [
   "pytest-cov>=7.1.0",
   "pytest-randomly>=4.1.0",
   "ruff>=0.16.2",
+  "types-yt-dlp>=2026.7.4.20260807",
 ]
 
 # Tool Configuration
