@@ -6,8 +6,7 @@ built inline for one edge case.
 
 One test, `test_malformed_headers_file_content_raises_a_named_error`, uses the real
 `ytmusicapi.YTMusic` client on purpose. A malformed headers file fails inside the `YTMusic`
-constructor, before any request goes out. The test therefore stays local and free of the network,
-and it still drives the real error path of the module.
+constructor, before any request goes out.
 
 No test reaches the network or reads a real headers file.
 """
@@ -20,7 +19,8 @@ from pathlib import Path
 import pytest
 from ytmusicapi.exceptions import YTMusicUserError
 
-from youtube_music_library_radio.catalogue import Song, candidate_songs, count_songs, merge_songs
+from testdoubles import FakeLibraryClient
+from youtube_music_library_radio.catalogue import Song, count_songs, merge_songs, songs_by_video_id
 from youtube_music_library_radio.refresh import _EXCLUDED_PATTERNS, ExcludedSong, _compile_matchers, library_songs, refresh
 
 if typing.TYPE_CHECKING:
@@ -36,22 +36,7 @@ def _load_fixture(name: str) -> list[dict[str, JSON]]:
     return typing.cast("list[dict[str, JSON]]", json.loads((_FIXTURES / name).read_text(encoding="utf-8")))
 
 
-class _FakeClient:
-    """A stand-in for `ytmusicapi.YTMusic`: `get_library_songs` returns a payload fixed at construction.
-
-    Built with an empty payload, this fake stands for an expired browser cookie. YouTube answers an
-    expired session with an empty result and no error. The fake therefore needs no failure mode of
-    its own for that fault.
-    """
-
-    def __init__(self, payload: list[dict[str, JSON]]) -> None:
-        self._payload: list[dict[str, JSON]] = payload
-        self.limits: list[int] = []
-
-    def get_library_songs(self, limit: int) -> list[dict[str, JSON]]:
-        """Return the payload this fake holds, and record the limit the caller asked for."""
-        self.limits.append(limit)
-        return self._payload
+_FakeClient = FakeLibraryClient
 
 
 def _headers_file(tmp_path: Path) -> Path:
@@ -61,18 +46,24 @@ def _headers_file(tmp_path: Path) -> Path:
     return headers_path
 
 
+def _stored(conn: sqlite3.Connection) -> list[Song]:
+    """Read every stored song back, through the accessor `harvest` uses."""
+    rows = typing.cast("list[sqlite3.Row]", conn.execute("SELECT video_id FROM songs").fetchall())
+    ids = {typing.cast("str", row["video_id"]) for row in rows}
+    return songs_by_video_id(conn, ids)
+
 def _seeded_song(video_id: str) -> Song:
     """Build the row `bootstrap` seeds: a video ID with an empty title and an empty artist.
 
     The `Everything N` playlists return video IDs and no titles, so every seeded row starts this
     way. No title-based rule can hold at that time, which is why `refresh` must delete the row.
     """
-    return Song(video_id=video_id, title="", artist="", failure_count=0, last_success=None, last_played=None)
+    return Song(video_id=video_id, title="", artist="")
 
 
 def _catalogue_ids(conn: sqlite3.Connection) -> set[str]:
     """Return the `video_id` of every row in the catalogue."""
-    return {song.video_id for song in candidate_songs(conn, window=0)}
+    return {song.video_id for song in _stored(conn)}
 
 
 def test_payload_becomes_songs(tmp_path: Path) -> None:
@@ -250,7 +241,7 @@ def test_every_project_pattern_compiles_to_one_matcher() -> None:
 def test_punctuation_inside_a_pattern_stays_a_literal() -> None:
     """`_compile_matchers` escapes each pattern, so a `.` inside one matches a dot and no other character.
 
-    Neither pattern in `_EXCLUDED_PATTERNS` holds a regex metacharacter today, so no title-level
+    No pattern in `_EXCLUDED_PATTERNS` holds a regex metacharacter today, so no title-level
     test covers `re.escape`. This one does: without `re.escape` the matcher for `c.o` also matches
     `cao`, and `refresh` then deletes songs the owner never named.
     """
@@ -464,3 +455,151 @@ def test_library_songs_reads_the_whole_library_by_default(tmp_path: Path) -> Non
     _ = library_songs(headers_path, client_factory=lambda _auth: client)
 
     assert client.limits == [25_000]
+
+
+def test_library_songs_reads_the_album_and_the_duration(tmp_path: Path) -> None:
+    """The Sonos match needs both. They arrive in the same library payload as the title."""
+    entry: dict[str, JSON] = {
+        "videoId": "WITHALBUM",
+        "title": "A Title",
+        "artists": [{"name": "A Band"}],
+        "album": {"name": "An Album", "id": "MPREb_x"},
+        "duration_seconds": 213,
+    }
+
+    scan = library_songs(_headers_file(tmp_path), client_factory=lambda _auth: _FakeClient([entry]))
+
+    assert (scan.songs[0].album, scan.songs[0].duration_seconds) == ("An Album", 213)
+
+
+def test_library_songs_degrades_an_absent_album_and_duration(tmp_path: Path) -> None:
+    """An absent album or duration is normal, and it must not drop the song.
+
+    `merge_songs` keeps a stored value against an empty incoming one, so a degraded read never
+    erases an album an earlier read stored.
+    """
+    entry: dict[str, JSON] = {"videoId": "BARE", "title": "A Title", "artists": [{"name": "A Band"}]}
+
+    scan = library_songs(_headers_file(tmp_path), client_factory=lambda _auth: _FakeClient([entry]))
+
+    assert (scan.songs[0].album, scan.songs[0].duration_seconds) == ("", 0)
+
+
+def test_library_songs_degrades_a_malformed_album_and_duration(tmp_path: Path) -> None:
+    """A value of the wrong type is a change in the library response, and it must not raise."""
+    entry: dict[str, JSON] = {
+        "videoId": "ODD",
+        "title": "A Title",
+        "artists": [{"name": "A Band"}],
+        "album": "a string, not an object",
+        "duration_seconds": "3:33",
+    }
+
+    scan = library_songs(_headers_file(tmp_path), client_factory=lambda _auth: _FakeClient([entry]))
+
+    assert (scan.songs[0].album, scan.songs[0].duration_seconds) == ("", 0)
+
+
+def test_refresh_marks_a_song_the_read_returned(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """A trusted read sets `last_seen` and clears `missing_count` on every song it held."""
+    _ = merge_songs(conn, [_seeded_song("KEPT")])
+
+    _ = refresh(conn, _headers_file(tmp_path), client_factory=lambda _auth: _FakeClient([_entry("KEPT")]))
+
+    song = next(s for s in _stored(conn) if s.video_id == "KEPT")
+    assert song.missing_count == 0
+    assert song.last_seen is not None
+
+
+def test_refresh_counts_a_song_the_read_did_not_return(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """One absent read is evidence. It raises the count and deletes nothing."""
+    _ = merge_songs(conn, [_seeded_song(f"V{index}") for index in range(10)])
+
+    result = refresh(conn, _headers_file(tmp_path), client_factory=lambda _auth: _FakeClient([_entry(f"V{i}") for i in range(9)]))
+
+    assert result.removed == 0
+    assert _catalogue_ids(conn) == {f"V{index}" for index in range(10)}
+    assert next(s for s in _stored(conn) if s.video_id == "V9").missing_count == 1
+
+
+def test_refresh_removes_a_song_after_enough_trusted_reads(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """A song the library really lost goes after `missing_threshold` trusted reads agree."""
+    _ = merge_songs(conn, [_seeded_song(f"V{index}") for index in range(10)])
+    payload = [_entry(f"V{index}") for index in range(9)]
+
+    removed = [
+        refresh(conn, _headers_file(tmp_path), client_factory=lambda _auth: _FakeClient(payload), missing_threshold=3).removed
+        for _ in range(3)
+    ]
+
+    assert removed == [0, 0, 1]
+    assert "V9" not in _catalogue_ids(conn)
+
+
+def test_refresh_refuses_a_read_that_lost_too_many_songs(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """A read holding far fewer songs than the catalogue is a short read, not a mass deletion.
+
+    This is the fault that makes an automatic removal dangerous. The rule must stop the run before
+    any count moves, so a bad read costs nothing at all.
+    """
+    _ = merge_songs(conn, [_seeded_song(f"V{index}") for index in range(10)])
+    half = [_entry(f"V{index}") for index in range(5)]
+
+    with pytest.raises(RuntimeError, match=r"returned 5 songs.*holds 10"):
+        _ = refresh(conn, _headers_file(tmp_path), client_factory=lambda _auth: _FakeClient(half))
+
+    assert _catalogue_ids(conn) == {f"V{index}" for index in range(10)}
+    assert all(song.missing_count == 0 for song in _stored(conn))
+
+
+def test_refresh_trusts_a_read_of_an_empty_catalogue(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """The first run has nothing to compare against, so the trust ratio must not block it."""
+    result = refresh(conn, _headers_file(tmp_path), client_factory=lambda _auth: _FakeClient([_entry("FIRST")]))
+
+    assert result.added == 1
+    assert _catalogue_ids(conn) == {"FIRST"}
+
+
+def test_refresh_clears_the_count_when_a_song_returns(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """A song that comes back starts again from zero, so two old absences never add to a later one."""
+    _ = merge_songs(conn, [_seeded_song(f"V{index}") for index in range(10)])
+    short = [_entry(f"V{index}") for index in range(9)]
+    full = [_entry(f"V{index}") for index in range(10)]
+
+    _ = refresh(conn, _headers_file(tmp_path), client_factory=lambda _auth: _FakeClient(short), missing_threshold=3)
+    _ = refresh(conn, _headers_file(tmp_path), client_factory=lambda _auth: _FakeClient(short), missing_threshold=3)
+    _ = refresh(conn, _headers_file(tmp_path), client_factory=lambda _auth: _FakeClient(full), missing_threshold=3)
+
+    assert next(s for s in _stored(conn) if s.video_id == "V9").missing_count == 0
+
+
+def _entry(video_id: str) -> dict[str, JSON]:
+    """Build one `get_library_songs` entry in the shape the live response uses."""
+    return {"videoId": video_id, "title": f"Title {video_id}", "artists": [{"name": "A Band"}]}
+
+
+class _PagingClient:
+    """A stand-in for `ytmusicapi.YTMusic` whose plain read drops songs, as the live one does.
+
+    The live `get_library_songs` pages the library, and it silently returns a short list. The same
+    call with `validate_responses` set re-reads a short page. This fake shows that difference.
+    """
+
+    def __init__(self, complete: list[dict[str, JSON]], short: list[dict[str, JSON]]) -> None:
+        self._complete: list[dict[str, JSON]] = complete
+        self._short: list[dict[str, JSON]] = short
+
+    def get_library_songs(self, limit: int, *, validate_responses: bool = False) -> list[dict[str, JSON]]:
+        """Return every song only when the caller asks for a validated read."""
+        _ = limit
+        return self._complete if validate_responses else self._short
+
+
+def test_library_songs_reads_the_whole_library(tmp_path: Path) -> None:
+    """A plain read drops about a quarter of this library, and `refresh` then counts songs as absent."""
+    complete = [_entry("V1"), _entry("V2"), _entry("V3")]
+    client = _PagingClient(complete, complete[:1])
+
+    scan = library_songs(_headers_file(tmp_path), client_factory=lambda _auth: client)
+
+    assert [song.video_id for song in scan.songs] == ["V1", "V2", "V3"]

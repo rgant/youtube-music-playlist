@@ -8,7 +8,7 @@ set positional-arguments := true
 # Default recipe runs the full pre-commit gate
 default: check
 
-# CI gate: format-check, lint, test
+# CI gate: lint, then test
 [group('check')]
 check: lint test
 

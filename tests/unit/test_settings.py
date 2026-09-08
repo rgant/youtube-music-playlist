@@ -17,16 +17,22 @@ def _clear_ytm_radio_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_defaults_match_the_documented_values() -> None:
-    """Every setting falls back to its documented default when no environment variable is set."""
+    """The README documents each of these default values.
+
+    A changed default contradicts the README, and nothing fails until the owner reaches the wrong
+    speaker or hears an unexpected repeat.
+    """
     settings = load_settings()
 
     assert settings.speaker_name == "Kitchen"
-    assert settings.no_repeat_window == 2000
-    assert settings.prune_threshold == 3
 
 
 def test_environment_overrides_a_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`YTM_RADIO_SPEAKER_NAME` overrides the default `speaker_name`."""
+    """`YTM_RADIO_SPEAKER_NAME` is the owner's one way to name a different room.
+
+    If the environment read breaks, `stop`, `status`, `harvest`, and `queue` all reach the Kitchen
+    speaker.
+    """
     monkeypatch.setenv("YTM_RADIO_SPEAKER_NAME", "Office")
 
     settings = load_settings()
@@ -40,49 +46,62 @@ def test_settings_reject_a_value_that_is_not_a_whole_number(monkeypatch: pytest.
     Every integer setting shares one reader. The bare `int()` error names the text alone and names
     no setting, so it fits every one of them.
     """
-    monkeypatch.setenv("YTM_RADIO_NO_REPEAT_WINDOW", "two thousand")
+    monkeypatch.setenv("YTM_RADIO_MISSING_THRESHOLD", "three")
 
-    with pytest.raises(ValueError, match=r"no_repeat_window.*YTM_RADIO_NO_REPEAT_WINDOW"):
+    with pytest.raises(ValueError, match=r"missing_threshold.*YTM_RADIO_MISSING_THRESHOLD"):
         _ = load_settings()
 
 
 def test_database_path_expands_the_home_directory() -> None:
-    """The default `database_path` is an absolute path with the home directory expanded."""
+    """`open_catalogue` calls `path.parent.mkdir(parents=True)`, so an unexpanded `~` builds a directory named `~`.
+
+    Each run from a different working directory then opens a different, empty catalogue.
+    """
     settings = load_settings()
 
     assert "~" not in str(settings.database_path)
     assert settings.database_path == Path.home() / ".local/share/youtube-music-library-radio/catalogue.sqlite3"
 
 
-def test_settings_reject_a_negative_no_repeat_window(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`load_settings` raises naming `no_repeat_window` and its environment variable when the value is negative."""
-    monkeypatch.setenv("YTM_RADIO_NO_REPEAT_WINDOW", "-1")
 
-    with pytest.raises(ValueError, match=r"no_repeat_window.*YTM_RADIO_NO_REPEAT_WINDOW"):
+
+
+
+def test_the_removal_settings_have_documented_defaults() -> None:
+    """A short library read must not remove songs. The owner acts on each default, so each is pinned."""
+    settings = load_settings()
+
+    assert settings.trust_ratio == 0.9
+    assert settings.missing_threshold == 3
+
+
+def test_settings_reject_a_trust_ratio_of_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A ratio of zero trusts a read that returns almost nothing, which removes almost everything."""
+    monkeypatch.setenv("YTM_RADIO_TRUST_RATIO", "0")
+
+    with pytest.raises(ValueError, match=r"trust_ratio.*YTM_RADIO_TRUST_RATIO"):
         _ = load_settings()
 
 
-def test_settings_accept_a_no_repeat_window_of_zero(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A `no_repeat_window` of exactly zero is valid: the lower bound is rejected, not the boundary itself."""
-    monkeypatch.setenv("YTM_RADIO_NO_REPEAT_WINDOW", "0")
+def test_settings_reject_a_trust_ratio_above_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A ratio above one refuses every read, so no refresh can ever change presence."""
+    monkeypatch.setenv("YTM_RADIO_TRUST_RATIO", "1.5")
 
-    settings = load_settings()
-
-    assert settings.no_repeat_window == 0
-
-
-def test_settings_reject_a_prune_threshold_below_one(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`load_settings` raises naming `prune_threshold` and its environment variable when the value is below one."""
-    monkeypatch.setenv("YTM_RADIO_PRUNE_THRESHOLD", "0")
-
-    with pytest.raises(ValueError, match=r"prune_threshold.*YTM_RADIO_PRUNE_THRESHOLD"):
+    with pytest.raises(ValueError, match=r"trust_ratio.*YTM_RADIO_TRUST_RATIO"):
         _ = load_settings()
 
 
-def test_settings_accept_a_prune_threshold_of_one(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A `prune_threshold` of exactly one is valid: the lower bound is rejected, not the boundary itself."""
-    monkeypatch.setenv("YTM_RADIO_PRUNE_THRESHOLD", "1")
+def test_settings_reject_a_trust_ratio_that_is_not_a_number(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`load_settings` names the field and its variable, as it does for a bad whole number."""
+    monkeypatch.setenv("YTM_RADIO_TRUST_RATIO", "most")
 
-    settings = load_settings()
+    with pytest.raises(ValueError, match=r"trust_ratio.*YTM_RADIO_TRUST_RATIO"):
+        _ = load_settings()
 
-    assert settings.prune_threshold == 1
+
+def test_settings_reject_a_missing_threshold_below_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A threshold below one removes a song on its first absent read."""
+    monkeypatch.setenv("YTM_RADIO_MISSING_THRESHOLD", "0")
+
+    with pytest.raises(ValueError, match=r"missing_threshold.*YTM_RADIO_MISSING_THRESHOLD"):
+        _ = load_settings()

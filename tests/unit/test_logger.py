@@ -31,8 +31,11 @@ def _make_record(level: int, message: str) -> logging.LogRecord:
     )
 
 
-def test_create_handler_uses_the_colour_formatter_on_a_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`create_handler` attaches a `RainbowLogFormatter` when the stream is a terminal."""
+def test_create_handler_uses_the_color_formatter_on_a_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The owner runs each command at a terminal and reads the level name by its color.
+
+    Without the formatter, an `ERROR` line looks the same as an `INFO` line.
+    """
     monkeypatch.setattr("sys.stderr", _FakeTTYStream())
 
     handler = create_handler()
@@ -41,7 +44,10 @@ def test_create_handler_uses_the_colour_formatter_on_a_terminal(monkeypatch: pyt
 
 
 def test_create_handler_uses_no_formatter_off_a_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`create_handler` leaves the default formatter alone when the stream is not a terminal."""
+    """A `cron` run or a redirect sends the log to a file.
+
+    A file has no terminal to interpret an escape code, so the codes become noise in the text.
+    """
     monkeypatch.setattr("sys.stderr", io.StringIO())
 
     handler = create_handler()
@@ -49,8 +55,12 @@ def test_create_handler_uses_no_formatter_off_a_terminal(monkeypatch: pytest.Mon
     assert handler.formatter is None
 
 
-def test_format_colours_the_level_name_and_keeps_the_message() -> None:
-    """`RainbowLogFormatter.format` injects the coloured level name and keeps the message text."""
+def test_format_colors_the_level_name_and_keeps_the_message() -> None:
+    """The exact escape codes are the output the owner reads.
+
+    A wrong code paints the wrong level. If `format` returns before `super().format`, the line
+    carries a level name and no message.
+    """
     formatter = RainbowLogFormatter("%(colorlevelname)s:%(message)s")
 
     info_output = formatter.format(_make_record(logging.INFO, "starting up"))

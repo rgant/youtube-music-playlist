@@ -86,7 +86,6 @@ bad-names = [ "foo", "bar", "baz", "qux", "toto", "tutu", "tata" ]
 [tool.pylint.design]
 max-args = 5
 max-locals = 15
-max-attributes = 9  # Matches every field on the Settings dataclass
 max-statements = 50
 exclude-too-few-public-methods = [
   "argparse\\.Namespace",
@@ -376,8 +375,8 @@ table_format = "long"
 collapse_tables = [ "project.authors" ]
 
 [tool.mypy]
-# `stubs` holds this project's own local stub for `soco`, which ships no type information; see
-# stubs/soco/__init__.pyi for why.
+# `stubs` holds this project's own local stub for `soco`, which ships no type information. Read
+# stubs/soco/__init__.pyi for the reason.
 mypy_path = [ "src", "tests/fixtures", "stubs" ]
 files = [ "src", "tests" ]
 # tests/unit and tests/integration are PEP 420 namespace packages (no __init__.py), matching
@@ -393,7 +392,6 @@ strict = true
 show_column_numbers = true
 
 [tool.pytest.ini_options]
-# Show logs during test runs for better debugging
 log_cli = false  # pytest -o log_cli=true
 log_cli_level = "INFO"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s"
@@ -432,8 +430,8 @@ omit = [ "**/test_*.py", "**/tests/*" ]
 [tool.basedpyright]
 venv = ".venv"
 venvPath = "."
-# `stubs` holds this project's own local stub for `soco`, which ships no type information; see
-# stubs/soco/__init__.pyi for why. This is basedpyright's analog of `[tool.mypy] mypy_path`.
+# `stubs` holds this project's own local stub for `soco`, which ships no type information. Read
+# stubs/soco/__init__.pyi for the reason. This is basedpyright's analog of `[tool.mypy] mypy_path`.
 stubPath = "stubs"
 exclude = [
   "**/.*",
@@ -446,7 +444,7 @@ extraPaths = [ "src", "tests/fixtures" ]
 # Disabled because ruff's ISC001 is also ignored project-wide (it conflicts with the formatter).
 # Both tools agree to not flag implicit string concatenation.
 reportImplicitStringConcatenation = false
-# Tests may access ``_underscored`` private members of the modules they exercise; this is the
+# Tests can access ``_underscored`` private members of the modules they exercise. This is the
 # basedpyright analog of ruff's ``SLF001`` per-file-ignore for tests. Autouse pytest fixtures are
 # never referenced by name, so basedpyright cannot see pytest's own runtime wiring to them.
 executionEnvironments = [

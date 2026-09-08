@@ -146,7 +146,7 @@ class _FakeResponse:
 
 
 def test_only_everything_playlists_survive_the_filter() -> None:
-    """`everything_playlist_ids` keeps a title starting with "Everything " and drops a bare-prefix look-alike.
+    """`everything_playlist_ids` keeps a title that starts with "Everything " and drops a bare-prefix look-alike.
 
     The fixture carries `EverythingElse` and `Liked Music` alongside two real `Everything N`
     playlists. A filter on the bare word `Everything` lets `EverythingElse` through.
@@ -167,7 +167,7 @@ def test_only_everything_playlists_survive_the_filter() -> None:
 
 
 def test_paging_follows_the_next_page_token() -> None:
-    """`_paginate` yields items from every page, not only the first, by following `nextPageToken`.
+    """`_paginate` follows `nextPageToken` and yields the items of every page.
 
     Page one is the recorded fixture, which carries `nextPageToken: "PLAYLISTS_PAGE_2"`. Page two
     is a second, distinct payload the fake serves only when it sees that token in the request URL.
@@ -208,7 +208,10 @@ def test_paging_raises_when_the_next_page_token_repeats() -> None:
 
 
 def test_playlist_items_yield_video_ids() -> None:
-    """`playlist_video_ids` reads `contentDetails.videoId` off every item in the recorded page."""
+    """`bootstrap` builds one catalogue row for each video ID this function returns.
+
+    A dropped item leaves that song out of the seeded catalogue.
+    """
     page = _load_fixture("playlist_items_page.json")
 
     def fake_fetch(url: str, headers: dict[str, str]) -> dict[str, JSON]:
@@ -221,7 +224,11 @@ def test_playlist_items_yield_video_ids() -> None:
 
 
 def test_bootstrap_adds_one_row_for_each_video_id(tmp_path: Path) -> None:
-    """`bootstrap` merges every video ID from every Everything playlist and returns the rows added."""
+    """`bootstrap` reads every Everything playlist and merges each one.
+
+    A stop after the first playlist seeds a catalogue that holds part of the library and reports
+    success.
+    """
     conn = open_catalogue(tmp_path / "catalogue.sqlite3")
     playlist_videos = {
         "PL_A": ["VIDEO_1", "VIDEO_2"],
@@ -254,7 +261,7 @@ def test_fetch_bytes_error_names_the_endpoint_and_never_the_token(monkeypatch: p
     """`_fetch_bytes` names the method and URL on a transport failure, and never a header value.
 
     A future edit that logs `request.headers` for a debug session leaks a bearer token. This test
-    uses a recognisable sentinel token. A message that echoes it therefore fails the last assertion,
+    uses a recognizable sentinel token. A message that echoes it therefore fails the last assertion,
     and never passes by coincidence.
     """
     sentinel_token = "SENTINEL-TOKEN-DO-NOT-LEAK"  # noqa: S105 -- a marker, never a real credential
@@ -277,7 +284,10 @@ def test_fetch_bytes_error_names_the_endpoint_and_never_the_token(monkeypatch: p
 
 
 def test_access_token_rejects_a_non_https_token_uri(tmp_path: Path) -> None:
-    """`access_token` raises before any network call when `token_uri` is not an https URL."""
+    """The token request carries the client secret and the refresh token in its body.
+
+    An `http` `token_uri` sends the secret and the token across the network in clear text.
+    """
     oauth_path = tmp_path / "oauth.json"
     _ = oauth_path.write_text(json.dumps({"refresh_token": "a-refresh-token"}), encoding="utf-8")
     client_secret_path = tmp_path / "client_secret.json"
@@ -291,7 +301,10 @@ def test_access_token_rejects_a_non_https_token_uri(tmp_path: Path) -> None:
 
 
 def test_load_json_object_parses_a_well_formed_file(tmp_path: Path) -> None:
-    """`_load_json_object` reads and parses a well-formed JSON object file."""
+    """`access_token` reads `oauth.json` and the client secret file through this function.
+
+    If it rejects a correct file, `bootstrap` gets no token and reads no playlist.
+    """
     path = tmp_path / "oauth.json"
     _ = path.write_text(json.dumps({"refresh_token": "a-refresh-token"}), encoding="utf-8")
 
@@ -301,7 +314,10 @@ def test_load_json_object_parses_a_well_formed_file(tmp_path: Path) -> None:
 
 
 def test_load_json_object_raises_when_the_top_level_value_is_not_an_object(tmp_path: Path) -> None:
-    """`_load_json_object` raises `CredentialError` when the file parses but holds no JSON object."""
+    """`main` reports a `CredentialError` as one log line that names the file.
+
+    A list that reaches the field checks raises `AttributeError` and gives the owner a traceback.
+    """
     path = tmp_path / "oauth.json"
     _ = path.write_text(json.dumps(["not", "an", "object"]), encoding="utf-8")
 
@@ -310,14 +326,20 @@ def test_load_json_object_raises_when_the_top_level_value_is_not_an_object(tmp_p
 
 
 def test_require_str_returns_a_present_string_field() -> None:
-    """`_require_str` returns the field's value when it is present and a string."""
+    """`access_token` reads every credential field through `_require_str`.
+
+    A check that rejects a correct value stops `bootstrap` before it reads one playlist.
+    """
     value = _require_str({"refresh_token": "a-refresh-token"}, "refresh_token", source="test", error=CredentialError)
 
     assert value == "a-refresh-token"
 
 
 def test_require_str_raises_naming_the_file_and_field_when_missing(tmp_path: Path) -> None:
-    """`_require_str` raises `CredentialError` naming the source and the field when the field is absent."""
+    """The owner keeps `oauth.json` and the client secret file side by side.
+
+    A message without the path and the field name leaves the owner to guess which file to correct.
+    """
     path = tmp_path / "oauth.json"
     _ = path.write_text(json.dumps({}), encoding="utf-8")
     data = _load_json_object(path)
@@ -329,7 +351,11 @@ def test_require_str_raises_naming_the_file_and_field_when_missing(tmp_path: Pat
 
 
 def test_require_str_raises_when_the_field_is_not_a_string(tmp_path: Path) -> None:
-    """`_require_str` raises `CredentialError` when the field is present but not a string."""
+    """A field of the wrong type is as fatal as an absent field.
+
+    Without this check, a wrong `client_id` reaches the token request. The later error then names
+    `token_uri` and not the credential file that holds the fault.
+    """
     path = tmp_path / "client_secret.json"
     _ = path.write_text(json.dumps({"client_id": 12345}), encoding="utf-8")
     data = _load_json_object(path)
@@ -352,7 +378,11 @@ def test_require_str_error_never_echoes_the_offending_value(tmp_path: Path) -> N
 
 
 def test_require_dict_raises_when_the_field_is_not_an_object(tmp_path: Path) -> None:
-    """`_require_dict` raises `CredentialError` when the field is present but not a JSON object."""
+    """`access_token` reads `client_id`, `client_secret`, and `token_uri` out of `installed`.
+
+    A string `installed` raises `AttributeError` on the next field read and gives the owner a
+    traceback.
+    """
     path = tmp_path / "client_secret.json"
     _ = path.write_text(json.dumps({"installed": "not-an-object"}), encoding="utf-8")
     data = _load_json_object(path)
@@ -362,7 +392,11 @@ def test_require_dict_raises_when_the_field_is_not_an_object(tmp_path: Path) -> 
 
 
 def test_http_get_json_parses_an_object_body(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_http_get_json` returns the top-level object of the response body."""
+    """`_http_get_json` is the default `fetch` for `everything_playlist_ids`, `playlist_video_ids`, and `bootstrap`.
+
+    Every test of them injects a fake fetch, so a direct call is the one way to prove the shipped
+    reader parses a real body.
+    """
 
     def fake_urlopen(*args: object, **kwargs: object) -> _FakeResponse:
         del args, kwargs
@@ -398,9 +432,9 @@ def test_http_get_json_reports_a_non_object_body_as_a_response_fault(monkeypatch
 def test_a_malformed_api_response_names_the_endpoint_and_the_field(conn: sqlite3.Connection, case: _MalformedResponse) -> None:
     """`bootstrap` raises `RuntimeError` naming the endpoint and the field for each malformed response.
 
-    Every case of `_MALFORMED_RESPONSES` reaches a field that a `typing.cast` once asserted without a
-    check. A cast on the same field raises `KeyError` for an absent field, and returns a value of the
-    wrong type for a present one. Neither is a `RuntimeError`, so this test fails on both.
+    Every case of `_MALFORMED_RESPONSES` reaches one field this module checks. A `typing.cast` in
+    place of that check raises `KeyError` for an absent field, and returns a value of the wrong type
+    for a present one. Neither is a `RuntimeError`, so this test fails on each.
 
     `RuntimeError` is the narrowest type that fits. `CredentialError` subclasses `TypeError`, so a
     case that reported a credential fault fails here too.

@@ -10,7 +10,7 @@ import dataclasses
 
 import pytest
 
-from youtube_music_library_radio.control import find_speaker, stop, transport_state
+from youtube_music_library_radio.control import _DISCOVERY_ATTEMPTS, find_speaker, stop, transport_state
 
 
 @dataclasses.dataclass
@@ -31,7 +31,10 @@ class _FakeSpeaker:
 
 
 def test_stop_calls_stop() -> None:
-    """`stop` calls `stop` on the speaker."""
+    """`_stop` logs "the speaker %s stopped" after this call returns.
+
+    If the call never reaches the speaker, playback continues and the log still reports a stop.
+    """
     speaker = _FakeSpeaker()
 
     stop(speaker)
@@ -40,14 +43,21 @@ def test_stop_calls_stop() -> None:
 
 
 def test_transport_state_reads_the_current_state() -> None:
-    """`transport_state` returns the speaker's reported `current_transport_state`."""
+    """`status` logs this string for the owner. A wrong key raises `KeyError`.
+
+    `_EXPECTED_FAILURES` does not name `KeyError`, so `main` prints a traceback.
+    """
     speaker = _FakeSpeaker(state="TRANSITIONING")
 
     assert transport_state(speaker) == "TRANSITIONING"
 
 
 def test_find_speaker_returns_the_speaker_with_the_matching_name() -> None:
-    """`find_speaker` returns the discovered speaker whose `player_name` matches."""
+    """A house holds more than one Sonos room.
+
+    A match on the wrong `player_name` sends `queue`, `harvest`, and `stop` to a room the owner did
+    not name.
+    """
     kitchen = _FakeSpeaker(player_name="Kitchen")
     office = _FakeSpeaker(player_name="Office")
 
@@ -57,7 +67,10 @@ def test_find_speaker_returns_the_speaker_with_the_matching_name() -> None:
 
 
 def test_find_speaker_discovers_when_the_caller_passes_no_discover_fn(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With no `discover_fn`, `find_speaker` calls `soco.discover` through `_default_discover`."""
+    """`__main__` calls `find_speaker` with the name alone.
+
+    `stop`, `status`, `harvest`, and `queue` therefore all run through the default `discover_fn`.
+    """
     speaker = _FakeSpeaker(player_name="Kitchen")
     # `find_speaker` bound `_default_discover` as its default argument at import time, so the seam a
     # test can move is `discover` itself. The autouse fixture patches the same name.
@@ -67,15 +80,23 @@ def test_find_speaker_discovers_when_the_caller_passes_no_discover_fn(monkeypatc
 
 
 def test_find_speaker_treats_no_discovery_result_as_an_empty_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`soco.discover` returns `None` when it finds nothing. `_default_discover` turns that into an empty set."""
+    """`soco.discover` returns `None` when it finds nothing.
+
+    Without `_default_discover`, `list(None)` raises `TypeError`, and `status` prints a traceback in
+    place of the speaker fault.
+    """
     monkeypatch.setattr("youtube_music_library_radio.control.discover", lambda: None)
 
     with pytest.raises(RuntimeError, match="none"):
-        _ = find_speaker("Kitchen")
+        _ = find_speaker("Kitchen", sleep_fn=lambda _seconds: None)
 
 
 def test_find_speaker_names_the_alternatives_when_it_fails() -> None:
-    """If no speaker matches, `find_speaker` raises and names every speaker discovery found."""
+    """The owner sets the speaker name with `YTM_RADIO_SPEAKER_NAME`.
+
+    The list of discovered names gives the owner the exact spelling to set, so a rename or a typo
+    takes one correction.
+    """
     kitchen = _FakeSpeaker(player_name="Kitchen")
     office = _FakeSpeaker(player_name="Office")
 
@@ -84,6 +105,51 @@ def test_find_speaker_names_the_alternatives_when_it_fails() -> None:
 
 
 def test_find_speaker_names_none_when_discovery_finds_nothing() -> None:
-    """If discovery finds no speaker at all, `find_speaker` raises and names "none"."""
+    """A wrong name and a dead network each stop the command.
+
+    "none" tells the owner which one happened, so the owner checks the network and not the spelling.
+    """
     with pytest.raises(RuntimeError, match="none"):
-        _ = find_speaker("Kitchen", discover_fn=list)
+        _ = find_speaker("Kitchen", discover_fn=list, sleep_fn=lambda _seconds: None)
+
+
+def test_find_speaker_looks_again_when_discovery_finds_nothing() -> None:
+    """SSDP is multicast, and one round misses a speaker that is on the network and awake."""
+    kitchen = _FakeSpeaker(player_name="Kitchen")
+    rounds: list[list[_FakeSpeaker]] = [[], [], [kitchen]]
+
+    found = find_speaker("Kitchen", discover_fn=lambda: rounds.pop(0), sleep_fn=lambda _seconds: None)
+
+    assert found is kitchen
+
+
+def test_find_speaker_gives_up_after_the_last_attempt() -> None:
+    """A speaker that is off never answers, and the message must arrive rather than a long wait."""
+    attempts = 0
+
+    def _empty() -> list[_FakeSpeaker]:
+        """Find no speaker, and count the round."""
+        nonlocal attempts
+        attempts += 1
+        return []
+
+    with pytest.raises(RuntimeError, match="none"):
+        _ = find_speaker("Kitchen", discover_fn=_empty, sleep_fn=lambda _seconds: None)
+
+    assert attempts == _DISCOVERY_ATTEMPTS
+
+
+def test_find_speaker_does_not_look_again_when_another_speaker_answers() -> None:
+    """A wrong name is not a network fault, so a second round finds the same speakers and wastes time."""
+    rounds = 0
+
+    def _office() -> list[_FakeSpeaker]:
+        """Find one speaker that carries the wrong name."""
+        nonlocal rounds
+        rounds += 1
+        return [_FakeSpeaker(player_name="Office")]
+
+    with pytest.raises(RuntimeError, match="Office"):
+        _ = find_speaker("Kitchen", discover_fn=_office, sleep_fn=lambda _seconds: None)
+
+    assert rounds == 1

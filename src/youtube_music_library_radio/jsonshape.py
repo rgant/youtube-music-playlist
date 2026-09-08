@@ -8,7 +8,7 @@ same way.
 
 # A JSON value, recursively. Every branch stays concrete, and no branch falls back to `object` or
 # `Any`. `isinstance` therefore narrows a field to a fully known type. A `typing.cast` asserts a
-# type without a check, so no cast stands in for a check of a value typed this way.
+# type and checks nothing, so no cast stands in for a check of a value typed this way.
 #
 # Public, and in a module of its own. `refresh.LibraryClient` returns `list[dict[str, JSON]]`, so a
 # caller outside that module cannot implement the protocol or annotate a factory for it without

@@ -1,15 +1,15 @@
 """Fill an empty catalogue for the first time, from the owner's "Everything N" YouTube playlists.
 
-The owner's account holds every library song's video ID, across 33 playlists named `Everything 1`
-through `Everything 33`. The YouTube Data API cannot read the YouTube Music library, so those
-playlists are the only route to that list. One full read costs about 354 quota units.
+The owner's account holds every library song's video ID, across playlists named `Everything 1` and
+up. The YouTube Data API cannot read the YouTube Music library, and these playlists carry the video
+IDs it can read cheaply. One full read costs about 354 quota units.
 
-This module runs one time, to seed the catalogue. Nothing writes to those playlists after that
-read, so they go stale by design.
+This module runs one time, to seed the catalogue. `refresh` reads the library itself after that, and
+`playlists` writes new songs back into these playlists.
 
 Each `Song` this module builds carries an empty title and an empty artist. `merge_songs` protects a
-stored non-empty value against an empty incoming one. `catalogue.record_success` fills the title and
-the artist after the first successful play.
+stored non-empty value against an empty incoming one. `refresh` fills the title and the artist from
+the library.
 """
 
 import json
@@ -134,7 +134,7 @@ def _field_error(source: Path | str, field: str, error: type[Exception]) -> Exce
     file passes `CredentialError`. A caller that reads an API response passes `RuntimeError`,
     because a changed response shape is no fault of the credential.
 
-    The message never holds the field's value. `source` often holds credentials. A value of the
+    The message never holds the field's value. `source` can name a credential file. A value of the
     wrong type can still carry a secret fragment inside it.
     """
     return error(f"{source}: missing or invalid required field {field!r}")
@@ -247,7 +247,7 @@ def _paginate(base_url: str, params: dict[str, str], token: str, fetch: _Fetch) 
         if not isinstance(next_token, str):
             raise _field_error(base_url, "nextPageToken", RuntimeError)
         if next_token == page_token:
-            message = f"{base_url} returned the same nextPageToken twice in a row; stopping instead of paging forever"
+            message = f"{base_url} returned the same nextPageToken twice in a row. It stops instead of paging forever"
             raise RuntimeError(message)
         page_token = next_token
 
@@ -288,8 +288,8 @@ def playlist_video_ids(token: str, playlist_id: str, *, fetch: _Fetch = _http_ge
 def bootstrap(conn: sqlite3.Connection, token: str, *, fetch: _Fetch = _http_get_json) -> int:
     """Read every Everything playlist and merge its video IDs into the catalogue. Return the rows added.
 
-    Each merged `Song` carries an empty title and an empty artist. `catalogue.record_success` fills
-    the title and the artist after the first successful play.
+    Each merged `Song` carries an empty title and an empty artist. `refresh` fills the title and
+    the artist from the library.
     """
     playlist_ids = everything_playlist_ids(token, fetch=fetch)
     _logger.info("bootstrap: found %d Everything playlists", len(playlist_ids))
@@ -299,7 +299,7 @@ def bootstrap(conn: sqlite3.Connection, token: str, *, fetch: _Fetch = _http_get
         video_ids = playlist_video_ids(token, playlist_id, fetch=fetch)
         _logger.info("bootstrap: playlist %s holds %d video ids", playlist_id, len(video_ids))
         songs.extend(
-            Song(video_id=video_id, title="", artist="", failure_count=0, last_success=None, last_played=None) for video_id in video_ids
+            Song(video_id=video_id, title="", artist="") for video_id in video_ids
         )
 
     added = merge_songs(conn, songs)

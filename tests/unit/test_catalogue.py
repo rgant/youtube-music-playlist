@@ -5,7 +5,6 @@ in `conftest.py` opens that database and closes it after the test passes or fail
 """
 
 import contextlib
-import logging
 import sqlite3
 import typing
 from pathlib import Path
@@ -13,24 +12,58 @@ from pathlib import Path
 import pytest
 
 from youtube_music_library_radio.catalogue import (
+    PlaylistMembership,
     Song,
-    candidate_songs,
     count_songs,
     delete_songs,
+    duplicated_video_ids,
+    mark_absent,
+    mark_present,
     merge_songs,
     open_catalogue,
-    record_failure,
-    record_success,
+    pair_sonos_track,
+    playlist_of,
+    record_playlists,
+    songs_by_video_id,
+    stored_playlists,
 )
 
 
+def _playlist(playlist_id: str, title: str, ordinal: int, video_ids: list[str]) -> PlaylistMembership:
+    """Build a `PlaylistMembership` for a test. `reported_count` matches the members given."""
+    return PlaylistMembership(
+        playlist_id=playlist_id,
+        title=title,
+        ordinal=ordinal,
+        reported_count=len(video_ids),
+        video_ids=tuple(video_ids),
+    )
+
+
+def _members(conn: sqlite3.Connection, playlist_id: str) -> list[str]:
+    """Return the stored video IDs of one playlist, in position order."""
+    cursor = conn.execute("SELECT video_id FROM playlist_songs WHERE playlist_id = ? ORDER BY position", (playlist_id,))
+    rows = typing.cast("list[sqlite3.Row]", cursor.fetchall())
+    return [typing.cast("str", row[0]) for row in rows]
+
+
+def _stored(conn: sqlite3.Connection) -> list[Song]:
+    """Read every stored song back, through the accessor `harvest` uses."""
+    rows = typing.cast("list[sqlite3.Row]", conn.execute("SELECT video_id FROM songs").fetchall())
+    ids = {typing.cast("str", row["video_id"]) for row in rows}
+    return songs_by_video_id(conn, ids)
+
 def _song(video_id: str, *, title: str = "Title", artist: str = "Artist") -> Song:
     """Build a `Song` with sensible defaults for the fields a test does not care about."""
-    return Song(video_id=video_id, title=title, artist=artist, failure_count=0, last_success=None, last_played=None)
+    return Song(video_id=video_id, title=title, artist=artist)
 
 
 def test_open_creates_the_table_and_sets_wal(tmp_path: Path) -> None:
-    """`open_catalogue` creates missing parent directories, the songs table, and WAL mode."""
+    """Every command but `auth` opens the catalogue first.
+
+    On a new machine the directory, the file, and the tables are absent, so the first run builds them. WAL mode
+    carries the concurrent access of a player and of `refresh`.
+    """
     db_path = tmp_path / "nested" / "catalogue.sqlite3"
 
     with contextlib.closing(open_catalogue(db_path)) as conn:
@@ -57,7 +90,10 @@ def test_open_refuses_a_python_that_cannot_share_a_connection(tmp_path: Path, mo
 
 
 def test_open_does_not_downgrade_an_existing_user_version(tmp_path: Path) -> None:
-    """`open_catalogue` does not stamp `user_version` back to 1 on a database a newer schema already versioned."""
+    """`user_version` is the one mark of which schema a database carries.
+
+    Nothing reads it yet, so a stamp back to 1 loses the mark and nothing reports the loss.
+    """
     db_path = tmp_path / "catalogue.sqlite3"
     with contextlib.closing(open_catalogue(db_path)) as conn:
         _ = conn.execute("PRAGMA user_version = 2")
@@ -78,7 +114,10 @@ def test_open_raises_when_the_backend_cannot_use_wal() -> None:
 
 
 def test_merge_adds_new_songs_and_reports_the_count(conn: sqlite3.Connection) -> None:
-    """`merge_songs` inserts every unseen song and returns how many rows it added."""
+    """The return value is what `refresh` and `bootstrap` report to the owner.
+
+    That number is what the owner reads as the size of the run.
+    """
     added = merge_songs(conn, [_song("a"), _song("b")])
 
     assert added == 2
@@ -86,7 +125,10 @@ def test_merge_adds_new_songs_and_reports_the_count(conn: sqlite3.Connection) ->
 
 
 def test_merge_with_no_songs_adds_nothing(conn: sqlite3.Connection) -> None:
-    """`merge_songs` returns 0 and leaves the table empty when given no songs."""
+    """An empty batch must change nothing.
+
+    The account can hold no `Everything` playlist, and `bootstrap` then merges an empty list.
+    """
     added = merge_songs(conn, [])
 
     assert added == 0
@@ -94,59 +136,58 @@ def test_merge_with_no_songs_adds_nothing(conn: sqlite3.Connection) -> None:
 
 
 def test_merge_tolerates_a_duplicate_video_id_within_one_batch(conn: sqlite3.Connection) -> None:
-    """`merge_songs` does not crash or half-apply when the same `video_id` appears twice in one batch."""
+    """A video ID in two playlists is the defect this project measures.
+
+    `bootstrap` merges every playlist together and removes no repeat, so one batch carries the same ID twice. A crash
+    part way through leaves a half-built catalogue, because the connection runs with `autocommit=True`.
+    """
     added = merge_songs(conn, [_song("a"), _song("a"), _song("b")])
 
     assert added == 2
     assert count_songs(conn) == 2
 
 
-def test_merge_keeps_counts_on_an_existing_row(conn: sqlite3.Connection) -> None:
-    """`merge_songs` does not reset failure_count, last_success, or last_played on an existing row."""
-    _ = merge_songs(conn, [_song("a")])
-    record_success(conn, "a", "Title", "Artist")
-    _ = record_failure(conn, "a", prune_threshold=5)
-    before = candidate_songs(conn, window=0)[0]
-
-    added = merge_songs(conn, [_song("a")])
-
-    after = candidate_songs(conn, window=0)[0]
-    assert added == 0
-    assert after.failure_count == before.failure_count
-    assert after.last_success == before.last_success
-    assert after.last_played == before.last_played
-
 
 def test_merge_fills_an_empty_title_from_the_incoming_row(conn: sqlite3.Connection) -> None:
-    """`merge_songs` overwrites an existing row's title and artist with non-empty incoming values."""
+    """`bootstrap` seeds a row with an empty title and an empty artist.
+
+    The library read is what puts a real name on the row, and `harvest` matches the Sonos queue on that name.
+    """
     _ = merge_songs(conn, [_song("a", title="", artist="")])
 
     _ = merge_songs(conn, [_song("a", title="Real Title", artist="Real Artist")])
 
-    song = candidate_songs(conn, window=0)[0]
+    song = _stored(conn)[0]
     assert song.title == "Real Title"
     assert song.artist == "Real Artist"
 
 
 def test_merge_keeps_an_existing_title_when_the_incoming_one_is_empty(conn: sqlite3.Connection) -> None:
-    """`merge_songs` does not blank a good stored title or artist with an empty incoming value."""
+    """`refresh` degrades a malformed title or artist to an empty value.
+
+    The library is the authority on the title and the artist. One degraded read must never erase a name `harvest`
+    matches on.
+    """
     _ = merge_songs(conn, [_song("a", title="Good Title", artist="Good Artist")])
 
     _ = merge_songs(conn, [_song("a", title="", artist="")])
 
-    song = candidate_songs(conn, window=0)[0]
+    song = _stored(conn)[0]
     assert song.title == "Good Title"
     assert song.artist == "Good Artist"
 
 
 def test_delete_removes_only_the_named_rows_and_reports_the_count(conn: sqlite3.Connection) -> None:
-    """`delete_songs` deletes the row of every named `video_id`, leaves the rest, and returns the rows deleted."""
+    """`refresh` deletes every excluded song by ID.
+
+    A delete that reaches past those IDs takes out the catalogue, and the catalogue holds no history to restore from.
+    """
     _ = merge_songs(conn, [_song("a"), _song("b"), _song("c")])
 
     deleted = delete_songs(conn, ["a", "c"])
 
     assert deleted == 2
-    assert [song.video_id for song in candidate_songs(conn, window=0)] == ["b"]
+    assert [song.video_id for song in _stored(conn)] == ["b"]
 
 
 def test_delete_ignores_a_video_id_absent_from_the_catalogue(conn: sqlite3.Connection) -> None:
@@ -164,13 +205,16 @@ def test_delete_ignores_a_video_id_absent_from_the_catalogue(conn: sqlite3.Conne
 
 
 def test_delete_counts_a_repeated_video_id_one_time(conn: sqlite3.Connection) -> None:
-    """`delete_songs` returns the rows deleted, not the IDs given, so a repeated `video_id` counts one."""
+    """`refresh` reports this number to the owner as the rows it deleted.
+
+    A count of the IDs given, rather than of the rows deleted, overstates the change to the catalogue.
+    """
     _ = merge_songs(conn, [_song("a"), _song("b")])
 
     deleted = delete_songs(conn, ["a", "a"])
 
     assert deleted == 1
-    assert [song.video_id for song in candidate_songs(conn, window=0)] == ["b"]
+    assert [song.video_id for song in _stored(conn)] == ["b"]
 
 
 def test_delete_with_no_video_ids_leaves_every_row_in_place(conn: sqlite3.Connection) -> None:
@@ -186,7 +230,7 @@ def test_delete_with_no_video_ids_leaves_every_row_in_place(conn: sqlite3.Connec
     deleted = delete_songs(conn, [])
 
     assert deleted == 0
-    assert {song.video_id for song in candidate_songs(conn, window=0)} == {"a", "b", "c"}
+    assert {song.video_id for song in _stored(conn)} == {"a", "b", "c"}
 
 
 def test_delete_accepts_more_ids_than_sqlite_allows_host_parameters(conn: sqlite3.Connection) -> None:
@@ -202,133 +246,223 @@ def test_delete_accepts_more_ids_than_sqlite_allows_host_parameters(conn: sqlite
     deleted = delete_songs(conn, video_ids)
 
     assert deleted == 1  # "v00039999" is the one ID of the 40,000 that the catalogue holds
-    assert [song.video_id for song in candidate_songs(conn, window=0)] == ["keep"]
+    assert [song.video_id for song in _stored(conn)] == ["keep"]
 
 
-def test_candidates_exclude_the_recently_played(conn: sqlite3.Connection) -> None:
-    """`candidate_songs` excludes the `window` most recently played songs."""
-    _ = merge_songs(conn, [_song("a"), _song("b"), _song("c")])
-    _ = conn.execute("UPDATE songs SET last_played = '2024-01-01T00:00:00+00:00' WHERE video_id = 'a'")
-    _ = conn.execute("UPDATE songs SET last_played = '2024-01-02T00:00:00+00:00' WHERE video_id = 'b'")
-    _ = conn.execute("UPDATE songs SET last_played = '2024-01-03T00:00:00+00:00' WHERE video_id = 'c'")
-
-    candidates = candidate_songs(conn, window=1)
-
-    ids = {song.video_id for song in candidates}
-    assert ids == {"a", "b"}
 
 
-def test_candidates_return_every_song_when_the_window_covers_the_table(conn: sqlite3.Connection) -> None:
-    """`candidate_songs` returns every row when `window` is at least the row count."""
-    _ = merge_songs(conn, [_song("a"), _song("b")])
-    _ = conn.execute("UPDATE songs SET last_played = '2024-01-01T00:00:00+00:00' WHERE video_id = 'a'")
-    _ = conn.execute("UPDATE songs SET last_played = '2024-01-02T00:00:00+00:00' WHERE video_id = 'b'")
-
-    candidates = candidate_songs(conn, window=2)
-
-    ids = {song.video_id for song in candidates}
-    assert ids == {"a", "b"}
 
 
-def test_candidates_include_a_song_that_never_played(conn: sqlite3.Connection) -> None:
-    """`candidate_songs` always includes a song whose `last_played` is `None`, regardless of `window`."""
-    _ = merge_songs(conn, [_song("a"), _song("b")])
-    _ = conn.execute("UPDATE songs SET last_played = '2024-01-01T00:00:00+00:00' WHERE video_id = 'a'")
-
-    candidates = candidate_songs(conn, window=1)
-
-    ids = {song.video_id for song in candidates}
-    assert "b" in ids
 
 
-def test_candidates_with_a_negative_window_returns_every_song(conn: sqlite3.Connection) -> None:
-    """`candidate_songs` treats a negative `window` as excluding nothing, not as SQLite's unlimited `LIMIT`."""
-    _ = merge_songs(conn, [_song("a")])
-    _ = conn.execute("UPDATE songs SET last_played = '2024-01-01T00:00:00+00:00' WHERE video_id = 'a'")
-
-    candidates = candidate_songs(conn, window=-1)
-
-    ids = {song.video_id for song in candidates}
-    assert ids == {"a"}
 
 
-def test_success_fills_an_empty_title_and_resets_the_failure_count(conn: sqlite3.Connection) -> None:
-    """`record_success` fills an empty title and artist, sets last_success and last_played, and clears failure_count.
 
-    `bootstrap` seeds every row with an empty title and artist, so the first play is what puts a
-    real name on the row.
+
+def test_open_creates_the_playlist_tables(tmp_path: Path) -> None:
+    """`playlists` and `harvest` read these tables on every run.
+
+    A catalogue from an earlier schema must gain them on open, because no other step creates a table.
     """
-    _ = merge_songs(conn, [_song("a", title="", artist="")])
-    _ = record_failure(conn, "a", prune_threshold=5)
-    _ = record_failure(conn, "a", prune_threshold=5)
+    with contextlib.closing(open_catalogue(tmp_path / "catalogue.sqlite3")) as conn:
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('playlists', 'playlist_songs')")
+        rows = typing.cast("list[sqlite3.Row]", cursor.fetchall())
 
-    record_success(conn, "a", "New Title", "New Artist")
-
-    song = candidate_songs(conn, window=0)[0]
-    assert song.title == "New Title"
-    assert song.artist == "New Artist"
-    assert song.failure_count == 0
-    assert song.last_success is not None
-    assert song.last_played is not None
+    assert sorted(typing.cast("str", row[0]) for row in rows) == ["playlist_songs", "playlists"]
 
 
-def test_success_keeps_a_stored_title_and_artist(conn: sqlite3.Connection) -> None:
-    """`record_success` does not replace a stored title or artist, and still records the play.
+def test_record_playlists_stores_the_membership(conn: sqlite3.Connection) -> None:
+    """`require_complete` compares the stored member rows against the count each playlist claims.
 
-    A player that reads neither an artist nor an uploader passes `"Unknown"` here. The library,
-    through `merge_songs`, is the authority on the title and the artist. One play must never
-    overwrite a real name with a value the player failed to read.
+    A member row that never lands makes the playlist look short, and every `playlists` run then refuses to write.
     """
-    _ = merge_songs(conn, [_song("a", title="Real Title", artist="Real Artist")])
+    record_playlists(conn, [_playlist("PL1", "Everything 1", 1, ["a", "b"])])
 
-    record_success(conn, "a", "Some Video Title", "Unknown")
+    cursor = conn.execute("SELECT video_id, position FROM playlist_songs WHERE playlist_id = 'PL1' ORDER BY position")
+    stored = typing.cast("list[sqlite3.Row]", cursor.fetchall())
 
-    song = candidate_songs(conn, window=0)[0]
-    assert song.title == "Real Title"
-    assert song.artist == "Real Artist"
-    assert song.last_played is not None
+    assert [(typing.cast("str", row[0]), typing.cast("int", row[1])) for row in stored] == [("a", 0), ("b", 1)]
 
 
-def test_success_on_an_unknown_video_id_is_a_no_op(conn: sqlite3.Connection) -> None:
-    """`record_success` does not raise or insert a row for a `video_id` absent from the catalogue."""
-    record_success(conn, "missing", "Title", "Artist")
+def test_record_playlists_accumulates_rather_than_replaces(conn: sqlite3.Connection) -> None:
+    """A short read must lose nothing. A later call adds what it saw and drops no earlier row.
 
-    assert count_songs(conn) == 0
-
-
-def test_failure_raises_the_count_below_the_threshold(conn: sqlite3.Connection) -> None:
-    """`record_failure` increments failure_count and returns False when it stays below `prune_threshold`."""
-    _ = merge_songs(conn, [_song("a")])
-
-    pruned = record_failure(conn, "a", prune_threshold=3)
-
-    assert pruned is False
-    song = candidate_songs(conn, window=0)[0]
-    assert song.failure_count == 1
-
-
-def test_failure_on_an_unknown_video_id_returns_true_and_warns(conn: sqlite3.Connection, caplog: pytest.LogCaptureFixture) -> None:
-    """`record_failure` treats an absent `video_id` as already pruned: returns True, and warns naming the row.
-
-    The warning is the only signal an operator gets for this condition, so the message must name the
-    row it is about.
+    `ytmusicapi` returns fewer songs than a playlist claims often enough to matter. A replace makes
+    the stored membership as short as the worst read. A short membership then makes the generator
+    write songs the playlist already holds.
     """
-    with caplog.at_level(logging.WARNING):
-        pruned = record_failure(conn, "absent-video-id", prune_threshold=3)
+    record_playlists(conn, [_playlist("PL1", "Everything 1", 1, ["a", "b"])])
 
-    assert pruned is True
-    warnings = [record.getMessage() for record in caplog.records if record.levelno == logging.WARNING]
-    assert len(warnings) == 1
-    assert "absent-video-id" in warnings[0]
-    assert "not in the catalogue" in warnings[0]
+    record_playlists(conn, [_playlist("PL1", "Everything 1", 1, ["b", "c"])])
+
+    assert _members(conn, "PL1") == ["a", "b", "c"]
 
 
-def test_failure_deletes_the_row_at_the_threshold(conn: sqlite3.Connection) -> None:
-    """`record_failure` deletes the row and returns True once failure_count reaches `prune_threshold`."""
-    _ = merge_songs(conn, [_song("a")])
-    _ = record_failure(conn, "a", prune_threshold=2)
+def test_record_playlists_updates_the_reported_count(conn: sqlite3.Connection) -> None:
+    """The count a playlist claims is authoritative even when the item fetch is short."""
+    record_playlists(conn, [_playlist("PL1", "Everything 1", 1, ["a"])])
 
-    pruned = record_failure(conn, "a", prune_threshold=2)
+    record_playlists(conn, [PlaylistMembership("PL1", "Everything 1", 1, 500, ("a",))])
 
-    assert pruned is True
-    assert count_songs(conn) == 0
+    stored = stored_playlists(conn)
+    assert [item.reported_count for item in stored] == [500]
+
+
+def test_stored_playlists_returns_the_accumulated_membership(conn: sqlite3.Connection) -> None:
+    """`stored_playlists` is the union every run builds on, in ordinal order."""
+    record_playlists(conn, [_playlist("PL2", "Everything 2", 2, ["c"]), _playlist("PL1", "Everything 1", 1, ["a"])])
+
+    stored = stored_playlists(conn)
+
+    assert [(item.title, item.video_ids) for item in stored] == [("Everything 1", ("a",)), ("Everything 2", ("c",))]
+
+
+def test_stored_playlists_is_empty_before_any_read(conn: sqlite3.Connection) -> None:
+    """A catalogue that never read a playlist reports none, and that is not a failure."""
+    assert not stored_playlists(conn)
+
+
+def test_playlist_of_names_the_lowest_ordinal_that_holds_the_song(conn: sqlite3.Connection) -> None:
+    """A song in two playlists reports the earlier one. The owner asked for the playlist that first held it."""
+    record_playlists(conn, [_playlist("PL9", "Everything 9", 9, ["dup"]), _playlist("PL2", "Everything 2", 2, ["dup"])])
+
+    assert playlist_of(conn, "dup") == "Everything 2"
+
+
+def test_playlist_of_returns_none_for_a_song_no_playlist_holds(conn: sqlite3.Connection) -> None:
+    """A video ID outside every playlist has no provenance, and that is not a failure."""
+    record_playlists(conn, [_playlist("PL1", "Everything 1", 1, ["a"])])
+
+    assert playlist_of(conn, "absent") is None
+
+
+def test_duplicated_video_ids_finds_a_song_in_two_playlists(conn: sqlite3.Connection) -> None:
+    """`playlists` warns the owner about each song that sits in more than one playlist.
+
+    A song in one playlist must stay out of that warning, or the warning fires on every run and means nothing.
+    """
+    record_playlists(conn, [_playlist("PL1", "Everything 1", 1, ["dup", "solo"]), _playlist("PL2", "Everything 2", 2, ["dup"])])
+
+    found = duplicated_video_ids(conn)
+
+    assert found == {"dup": ["Everything 1", "Everything 2"]}
+
+
+_NEW_COLUMNS = (
+    "album",
+    "duration_seconds",
+    "sonos_track_id",
+    "sonos_uri",
+    "first_seen",
+    "last_seen",
+    "missing_count",
+    "last_queued",
+)
+
+
+def test_open_adds_the_library_columns_to_an_older_database(tmp_path: Path) -> None:
+    """A catalogue written before these columns must open and keep every row.
+
+    The owner's catalogue holds thousands of rows and a play history no read can rebuild. A schema
+    change that needs a fresh database throws that away.
+    """
+    db_path = tmp_path / "catalogue.sqlite3"
+    plain = sqlite3.connect(db_path)
+    _ = plain.execute("CREATE TABLE songs (video_id TEXT PRIMARY KEY, title TEXT NOT NULL, artist TEXT NOT NULL)")
+    _ = plain.execute("INSERT INTO songs VALUES ('old', 'Kept Title', 'Kept Artist')")
+    plain.commit()
+    plain.close()
+
+    with contextlib.closing(open_catalogue(db_path)) as conn:
+        info = typing.cast("list[sqlite3.Row]", conn.execute("PRAGMA table_info(songs)").fetchall())
+        columns = {typing.cast("str", row[1]) for row in info}
+        kept = typing.cast("list[sqlite3.Row]", conn.execute("SELECT title FROM songs WHERE video_id = 'old'").fetchall())
+
+    assert set(_NEW_COLUMNS) <= columns
+    assert [typing.cast("str", row[0]) for row in kept] == ["Kept Title"]
+
+
+def test_merge_songs_stores_the_album_and_the_duration(conn: sqlite3.Connection) -> None:
+    """The match needs both. They come from the library read and belong beside the title."""
+    _ = merge_songs(conn, [Song(video_id="a", title="T", artist="A", album="Al", duration_seconds=210)])
+
+    stored = _stored(conn)
+
+    assert (stored[0].album, stored[0].duration_seconds) == ("Al", 210)
+
+
+def test_merge_songs_keeps_a_stored_album_against_an_empty_one(conn: sqlite3.Connection) -> None:
+    """An absent album degrades to "", and an empty value must never replace a real one."""
+    _ = merge_songs(conn, [Song(video_id="a", title="T", artist="A", album="Real Album", duration_seconds=210)])
+
+    _ = merge_songs(conn, [Song(video_id="a", title="T", artist="A", album="", duration_seconds=0)])
+
+    stored = _stored(conn)
+    assert (stored[0].album, stored[0].duration_seconds) == ("Real Album", 210)
+
+
+def test_a_song_round_trips_every_new_field(conn: sqlite3.Connection) -> None:
+    """Every column the queue builder and the harvest write must survive a read."""
+    _ = merge_songs(conn, [Song(video_id="a", title="T", artist="A", album="Al", duration_seconds=210)])
+    _ = pair_sonos_track(conn, "a", track_id="SONOS1", uri="x-sonosapi-hls-static:SONOS1?sid=284")
+
+    stored = _stored(conn)[0]
+
+    assert stored.sonos_track_id == "SONOS1"
+    assert stored.sonos_uri == "x-sonosapi-hls-static:SONOS1?sid=284"
+    assert stored.first_seen is not None
+    assert stored.last_seen is not None
+    assert stored.last_queued is None
+
+
+def _presence(conn: sqlite3.Connection, video_id: str) -> tuple[int, bool]:
+    """Return the `missing_count` of one song and whether it carries a `last_seen`."""
+    song = next(s for s in _stored(conn) if s.video_id == video_id)
+    return song.missing_count, song.last_seen is not None
+
+
+def test_mark_present_clears_the_missing_count(conn: sqlite3.Connection) -> None:
+    """A song the library returned is present. The count measures absences in a row, so it resets."""
+    _ = merge_songs(conn, [Song(video_id="a", title="T", artist="A")])
+    _ = mark_absent(conn, present=[], threshold=99)
+    _ = mark_absent(conn, present=[], threshold=99)
+
+    mark_present(conn, ["a"])
+
+    assert _presence(conn, "a") == (0, True)
+
+
+def test_mark_absent_raises_the_count_of_a_song_the_read_missed(conn: sqlite3.Connection) -> None:
+    """One absence is evidence, not a verdict. The count carries that evidence to the next run."""
+    _ = merge_songs(conn, [Song(video_id="kept", title="T", artist="A"), Song(video_id="gone", title="T", artist="A")])
+
+    _ = mark_absent(conn, present=["kept"], threshold=99)
+
+    assert _presence(conn, "gone")[0] == 1
+    assert _presence(conn, "kept")[0] == 0
+
+
+def test_mark_absent_deletes_a_song_that_reaches_the_threshold(conn: sqlite3.Connection) -> None:
+    """Several trusted reads in a row must agree before a row goes. One short read must not decide."""
+    _ = merge_songs(conn, [Song(video_id="gone", title="T", artist="A")])
+
+    counts = [mark_absent(conn, present=[], threshold=3) for _ in range(3)]
+
+    assert counts == [0, 0, 1]
+    assert _catalogue_video_ids(conn) == set()
+
+
+def test_mark_absent_keeps_a_song_below_the_threshold(conn: sqlite3.Connection) -> None:
+    """A song absent from fewer reads than the threshold stays, so a transient fault costs nothing."""
+    _ = merge_songs(conn, [Song(video_id="gone", title="T", artist="A")])
+
+    _ = mark_absent(conn, present=[], threshold=3)
+    _ = mark_absent(conn, present=[], threshold=3)
+
+    assert _catalogue_video_ids(conn) == {"gone"}
+    assert _presence(conn, "gone")[0] == 2
+
+
+def _catalogue_video_ids(conn: sqlite3.Connection) -> set[str]:
+    """Return the `video_id` of every row the catalogue holds."""
+    return {song.video_id for song in _stored(conn)}

@@ -15,7 +15,7 @@ import shlex
 _HEADER_FLAGS = ("-H", "--header")
 _COOKIE_FLAGS = ("-b", "--cookie")
 
-# The two headers `ytmusicapi.auth.browser.setup_browser` refuses to work without.
+# The headers `ytmusicapi.auth.browser.setup_browser` refuses to work without.
 _REQUIRED = ("cookie", "x-goog-authuser")
 
 CURL_INSTRUCTIONS = """\
@@ -76,6 +76,8 @@ def parse_header_block(text: str) -> dict[str, str]:
     headers: dict[str, str] = {}
     for line in text.splitlines():
         name, separator, content = line.partition(": ")
+        # Chrome writes the HTTP/2 pseudo-headers (`:authority`, `:method`) into the block, and
+        # `ytmusicapi` rejects them. The leading colon is what marks one.
         if separator and not name.startswith(":"):
             headers[name.strip().lower()] = content.strip()
     return headers

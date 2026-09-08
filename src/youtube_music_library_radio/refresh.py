@@ -33,7 +33,7 @@ import typing
 from ytmusicapi import YTMusic
 from ytmusicapi.exceptions import YTMusicError
 
-from youtube_music_library_radio.catalogue import Song, delete_songs, merge_songs
+from youtube_music_library_radio.catalogue import Song, count_songs, delete_songs, mark_absent, mark_present, merge_songs
 
 if typing.TYPE_CHECKING:
     import sqlite3
@@ -44,9 +44,18 @@ if typing.TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
-# The library holds roughly 18,000 songs (see the design doc). `get_library_songs` needs a limit
+# The library holds roughly 20,500 songs (see `docs/plans/2026-08-16-library-database.md`). `get_library_songs` needs a limit
 # above the library size to read every song in one call, so this leaves comfortable headroom.
 _LIBRARY_LIMIT = 25_000
+
+# How much of the stored catalogue a library read must return before `refresh` trusts it with
+# presence. A short read looks exactly like a mass removal, so an untrusted read changes no count
+# and deletes no row. `YTM_RADIO_TRUST_RATIO` overrides this.
+_DEFAULT_TRUST_RATIO = 0.9
+
+# How many trusted reads in a row must miss a song before `refresh` removes it. One absent read can
+# be a transient fault. `YTM_RADIO_MISSING_THRESHOLD` overrides this.
+_DEFAULT_MISSING_THRESHOLD = 3
 
 # A library song whose title holds one of these as a whole word leaves the catalogue. A radio edit
 # and a censored cut both duplicate a song the library already holds in full. Add a lowercase
@@ -109,8 +118,12 @@ class LibraryClient(typing.Protocol):
     `library_songs`, and it takes the same injected client factory that `refresh` takes.
     """
 
-    def get_library_songs(self, limit: int) -> list[dict[str, JSON]]:
-        """Return every song in the library, as `ytmusicapi.YTMusic.get_library_songs` does."""
+    def get_library_songs(self, limit: int, *, validate_responses: bool = False) -> list[dict[str, JSON]]:
+        """Return every song in the library, as `ytmusicapi.YTMusic.get_library_songs` does.
+
+        `validate_responses` makes the reader count each page and read a short one again. Without
+        it the call returns a fraction of the library and reports no error.
+        """
         ...  # pragma: no cover -- a Protocol's method body never runs. Only an implementation's body runs
 
 
@@ -146,13 +159,18 @@ class LibraryScan:
 class RefreshResult:
     """What one `refresh` call did to the catalogue.
 
-    `deleted` can be below the length of `excluded`. An excluded song enters the catalogue only when
-    an earlier run put it there, and a song the catalogue never held deletes nothing.
+    `deleted` counts the excluded songs it removed. That number can be below the length of
+    `excluded`. An excluded song enters the catalogue only when an earlier run put it there, and a
+    song the catalogue never held deletes nothing.
+
+    `removed` counts the songs the library lost. A song reaches that count only after
+    `missing_threshold` trusted reads in a row did not return it.
     """
 
     added: int
     excluded: tuple[ExcludedSong, ...]
     deleted: int
+    removed: int = 0
 
 
 def _first_artist(entry: dict[str, JSON], video_id: str) -> str:
@@ -168,12 +186,12 @@ def _first_artist(entry: dict[str, JSON], video_id: str) -> str:
 
     first = artists[0]
     if not isinstance(first, dict):
-        _logger.warning("refresh: video_id %s has a malformed artists[0] entry; using an empty artist", video_id)
+        _logger.warning("refresh: video_id %s has a malformed artists[0] entry. Using an empty artist", video_id)
         return ""
 
     name = first.get("name")
     if not isinstance(name, str):
-        _logger.warning("refresh: video_id %s has a malformed artists[0].name; using an empty artist", video_id)
+        _logger.warning("refresh: video_id %s has a malformed artists[0].name. Using an empty artist", video_id)
         return ""
 
     return name
@@ -190,10 +208,49 @@ def _title(entry: dict[str, JSON], video_id: str) -> str:
 
     title = entry["title"]
     if not isinstance(title, str):
-        _logger.warning("refresh: video_id %s has a malformed title; using an empty title", video_id)
+        _logger.warning("refresh: video_id %s has a malformed title. Using an empty title", video_id)
         return ""
 
     return title
+
+
+def _album(entry: dict[str, JSON], video_id: str) -> str:
+    """Return the name of `entry`'s album. An absent or malformed `album` gives "".
+
+    The Sonos match reads the title, the artist, and the album. The album separates a re-recording
+    from the original. A song with no album is real, so an absent value gets no warning.
+    """
+    album = entry.get("album")
+    if album is None:
+        return ""
+
+    if not isinstance(album, dict):
+        _logger.warning("refresh: video_id %s has a malformed album. Using an empty album", video_id)
+        return ""
+
+    name = album.get("name")
+    if not isinstance(name, str):
+        _logger.warning("refresh: video_id %s has a malformed album.name. Using an empty album", video_id)
+        return ""
+
+    return name
+
+
+def _duration_seconds(entry: dict[str, JSON], video_id: str) -> int:
+    """Return `entry`'s length in seconds. An absent or malformed `duration_seconds` gives 0.
+
+    The length settles a match that the title, the artist, and the album leave open. A `bool` is an
+    `int` in Python and never a length, so this rejects one.
+    """
+    seconds = entry.get("duration_seconds")
+    if seconds is None:
+        return 0
+
+    if not isinstance(seconds, int) or isinstance(seconds, bool):
+        _logger.warning("refresh: video_id %s has a malformed duration_seconds. Using 0", video_id)
+        return 0
+
+    return seconds
 
 
 def _matched_pattern(title: str) -> str | None:
@@ -218,9 +275,8 @@ def _songs_from_payload(payload: list[dict[str, JSON]]) -> LibraryScan:
     of thousands must not fail the whole refresh.
 
     An absent `title`, or a `title` of the wrong type, degrades to "". `_first_artist` treats
-    `artists` the same way. The catalogue already reads an empty title as normal, and fills it later
-    in `catalogue.merge_songs` and in `catalogue.record_success`. `bootstrap` seeds every song that
-    way.
+    `artists` the same way. The catalogue already reads an empty title as normal, and
+    `catalogue.merge_songs` fills it on a later read. `bootstrap` seeds every song that way.
 
     Puts a song whose title holds a pattern of `_EXCLUDED_PATTERNS` as a whole word in `excluded`,
     and not in `songs`.
@@ -244,7 +300,15 @@ def _songs_from_payload(payload: list[dict[str, JSON]]) -> LibraryScan:
             excluded.append(ExcludedSong(video_id=video_id, title=title, artist=artist, pattern=pattern))
             continue
 
-        songs.append(Song(video_id=video_id, title=title, artist=artist, failure_count=0, last_success=None, last_played=None))
+        songs.append(
+            Song(
+                video_id=video_id,
+                title=title,
+                artist=artist,
+                album=_album(entry, video_id),
+                duration_seconds=_duration_seconds(entry, video_id),
+            )
+        )
 
     return LibraryScan(songs=tuple(songs), excluded=tuple(excluded))
 
@@ -294,7 +358,7 @@ def library_songs(headers_path: Path, *, client_factory: ClientFactory = YTMusic
 
     Raises the same `RuntimeError` when `get_library_songs` returns no songs at all. YouTube answers
     an expired browser cookie with an empty result and no error. An empty read and a dead credential
-    look the same from here. This project plays a library of about 16,000 songs, so an empty read is
+    look the same from here. This project plays a library of about 20,500 songs, so an empty read is
     a broken credential.
 
     Without this check, `refresh` reports "added 0 rows" against a dead credential and returns 0. The
@@ -309,7 +373,7 @@ def library_songs(headers_path: Path, *, client_factory: ClientFactory = YTMusic
     try:
         client = client_factory(str(headers_path))
         _logger.info("reading up to %d songs from the library. A full read takes a few minutes", limit)
-        payload = client.get_library_songs(limit=limit)
+        payload = client.get_library_songs(limit=limit, validate_responses=True)
         _logger.info("the library read returned %d songs", len(payload))
     except (YTMusicError, json.JSONDecodeError) as exc:
         raise _headers_file_error(headers_path) from exc
@@ -320,19 +384,58 @@ def library_songs(headers_path: Path, *, client_factory: ClientFactory = YTMusic
     return _songs_from_payload(payload)
 
 
-def refresh(conn: sqlite3.Connection, headers_path: Path, *, client_factory: ClientFactory = YTMusic) -> RefreshResult:
-    """Read the library, merge it into the catalogue, and delete every excluded song from the catalogue.
+def _require_trusted_read(conn: sqlite3.Connection, returned: int, trust_ratio: float) -> None:
+    """Raise `RuntimeError` when the read holds far fewer songs than the catalogue already does.
+
+    A short read looks exactly like a mass removal: every song it missed is absent. Presence must
+    therefore change only after a read this function accepts.
+
+    An empty catalogue trusts any read. The first run has nothing to compare against, and a ratio
+    against zero accepts everything anyway.
+    """
+    stored = count_songs(conn)
+    if stored == 0:
+        return
+
+    floor = int(stored * trust_ratio)
+    if returned < floor:
+        message = (
+            f"the library read returned {returned} songs and the catalogue holds {stored}. "
+            f"That is below the trusted floor of {floor}, so nothing changed. Run refresh again"
+        )
+        raise RuntimeError(message)
+
+
+def refresh(
+    conn: sqlite3.Connection,
+    headers_path: Path,
+    *,
+    client_factory: ClientFactory = YTMusic,
+    trust_ratio: float = _DEFAULT_TRUST_RATIO,
+    missing_threshold: int = _DEFAULT_MISSING_THRESHOLD,
+) -> RefreshResult:
+    """Read the library and bring the catalogue into line with it.
+
+    Adds a song the library gained. Updates the title, artist, album, and duration of a song it
+    already holds. Deletes a song whose title matches an exclusion pattern. Removes a song the
+    library lost, once enough trusted reads agree that it is gone.
 
     Logs one INFO line per excluded song, which names the pattern, the video ID, the artist, and the
     title. The owner reads that listing to confirm that a pattern matches the right songs.
 
-    Raises the same `RuntimeError` as `library_songs` for an absent headers file, a rejected one, or
-    an empty library read. This function never runs on the playback path. The owner runs it by hand.
-    A failure here stops new songs from arriving, and never stops the song that plays. It writes
-    nothing to the catalogue after that failure, because the read comes first.
+    Raises `RuntimeError` when the read returns fewer songs than `trust_ratio` of the stored count.
+    Presence never changes on that path, so a short read costs a re-run and nothing else. It also
+    raises the same `RuntimeError` as `library_songs` for an absent headers file, a rejected one, or
+    an empty library read.
+
+    This function never runs on the playback path. The owner runs it by hand. A failure here stops
+    new songs from arriving, and never stops the song that plays.
     """
     scan = library_songs(headers_path, client_factory=client_factory)
+    _require_trusted_read(conn, len(scan.songs) + len(scan.excluded), trust_ratio)
+
     added = merge_songs(conn, scan.songs)
+    mark_present(conn, [song.video_id for song in scan.songs])
 
     for song in scan.excluded:
         _logger.info(
@@ -344,11 +447,20 @@ def refresh(conn: sqlite3.Connection, headers_path: Path, *, client_factory: Cli
         )
     deleted = delete_songs(conn, [song.video_id for song in scan.excluded])
 
+    # An excluded song is present in the library, so it must not also count as absent. The deletion
+    # above already removed its row, so `mark_absent` finds nothing to raise.
+    removed = mark_absent(
+        conn,
+        present=[song.video_id for song in scan.songs],
+        threshold=missing_threshold,
+    )
+
     _logger.info(
-        "refresh: kept %d library songs, added %d new rows, excluded %d songs, deleted %d rows",
+        "refresh: kept %d library songs, added %d new rows, excluded %d songs, deleted %d rows, removed %d absent songs",
         len(scan.songs),
         added,
         len(scan.excluded),
         deleted,
+        removed,
     )
-    return RefreshResult(added=added, excluded=scan.excluded, deleted=deleted)
+    return RefreshResult(added=added, excluded=scan.excluded, deleted=deleted, removed=removed)

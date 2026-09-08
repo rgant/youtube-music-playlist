@@ -4,23 +4,22 @@ import threading
 import time
 import typing
 
-from youtube_music_library_radio.catalogue import Song, count_songs, merge_songs, open_catalogue, record_failure
+from youtube_music_library_radio.catalogue import Song, count_songs, mark_queued, merge_songs, open_catalogue
 
 if typing.TYPE_CHECKING:
     import sqlite3
     from pathlib import Path
 
-_SONG_A = Song(video_id="a", title="A", artist="Artist", failure_count=0, last_success=None, last_played=None)
-_SONG_B = Song(video_id="b", title="B", artist="Artist", failure_count=0, last_success=None, last_played=None)
+_SONG_A = Song(video_id="a", title="A", artist="Artist")
+_SONG_B = Song(video_id="b", title="B", artist="Artist")
 
 
 def test_one_connection_reads_and_writes_from_a_second_thread(tmp_path: Path) -> None:
     """A thread that did not open the connection can still read and write through it.
 
-    A player that serves each request on its own thread reads the candidate songs and writes the
-    play result from those threads. They all share the one connection the process opened at
-    start-up. Without `check_same_thread=False`, the first query on a second thread raises
-    `sqlite3.ProgrammingError` and playback stops.
+    A process that serves each request on its own thread reads and writes through the one
+    connection it opened at start-up. Without `check_same_thread=False`, the first query on a second
+    thread raises `sqlite3.ProgrammingError`.
     """
     db_path = tmp_path / "catalogue.sqlite3"
     conn = open_catalogue(db_path)
@@ -32,7 +31,7 @@ def test_one_connection_reads_and_writes_from_a_second_thread(tmp_path: Path) ->
         """Run one read and one write through the connection the main thread opened."""
         try:
             counts.append(count_songs(conn))
-            _ = record_failure(conn, "a", prune_threshold=5)
+            mark_queued(conn, ["a"])
         except BaseException as exc:  # noqa: BLE001 (surface the failure to the main thread instead of a bare thread crash)
             errors.append(exc)
 
@@ -42,12 +41,12 @@ def test_one_connection_reads_and_writes_from_a_second_thread(tmp_path: Path) ->
 
     assert not errors
     assert counts == [1]
-    row = typing.cast("sqlite3.Row", conn.execute("SELECT failure_count FROM songs WHERE video_id = 'a'").fetchone())
-    assert typing.cast("int", row["failure_count"]) == 1
+    row = typing.cast("sqlite3.Row", conn.execute("SELECT last_queued FROM songs WHERE video_id = 'a'").fetchone())
+    assert row["last_queued"] is not None
     conn.close()
 
 
-def test_a_failure_write_and_a_merge_write_both_survive(tmp_path: Path) -> None:
+def test_a_queued_write_and_a_merge_write_both_survive(tmp_path: Path) -> None:
     """A failure recorded on one connection and songs merged on a second connection both persist.
 
     Each write starts while a third connection holds a read transaction open on the same database
@@ -70,7 +69,7 @@ def test_a_failure_write_and_a_merge_write_both_survive(tmp_path: Path) -> None:
         """Record a failure on one connection, then merge a new song on a second, distinct connection."""
         try:
             failure_conn = open_catalogue(db_path)
-            _ = record_failure(failure_conn, "a", prune_threshold=5)
+            mark_queued(failure_conn, ["a"])
             failure_conn.close()
 
             merge_conn = open_catalogue(db_path)
@@ -93,8 +92,8 @@ def test_a_failure_write_and_a_merge_write_both_survive(tmp_path: Path) -> None:
 
     verify_conn = open_catalogue(db_path)
     assert count_songs(verify_conn) == 2
-    row = typing.cast("sqlite3.Row", verify_conn.execute("SELECT failure_count FROM songs WHERE video_id = 'a'").fetchone())
-    assert typing.cast("int", row["failure_count"]) == 1
+    row = typing.cast("sqlite3.Row", verify_conn.execute("SELECT last_queued FROM songs WHERE video_id = 'a'").fetchone())
+    assert row["last_queued"] is not None
     verify_conn.close()
 
 
@@ -131,7 +130,7 @@ def test_two_writer_connections_contending_for_the_lock_both_land(tmp_path: Path
         try:
             assert lock_held.wait(timeout=5)
             writer_conn = open_catalogue(db_path)
-            _ = record_failure(writer_conn, "a", prune_threshold=5)
+            mark_queued(writer_conn, ["a"])
             writer_conn.close()
         except BaseException as exc:  # noqa: BLE001 (surface the failure to the main thread instead of a bare thread crash)
             errors.append(exc)
@@ -146,6 +145,6 @@ def test_two_writer_connections_contending_for_the_lock_both_land(tmp_path: Path
     assert not errors
 
     verify_conn = open_catalogue(db_path)
-    row = typing.cast("sqlite3.Row", verify_conn.execute("SELECT failure_count FROM songs WHERE video_id = 'a'").fetchone())
-    assert typing.cast("int", row["failure_count"]) == 1
+    row = typing.cast("sqlite3.Row", verify_conn.execute("SELECT last_queued FROM songs WHERE video_id = 'a'").fetchone())
+    assert row["last_queued"] is not None
     verify_conn.close()
