@@ -6,7 +6,7 @@
 set positional-arguments := true
 
 # Default recipe runs the full pre-commit gate
-default: check
+default: format check
 
 # CI gate: lint, then test
 [group('check')]
@@ -69,6 +69,14 @@ brew-check:
 clean:
     find . -type d \( -name __pycache__ -o -name .pytest_cache -o -name .mypy_cache -o -name .ruff_cache -o -name .basedpyright \) -exec rm -rf {} + 2>/dev/null || true
     find . -type f -name '*.pyc' -delete 2>/dev/null || true
+
+# Update this Mac to the pushed code, then restart the agents. Run it on the mini
+[group('deploy')]
+deploy-update:
+    git pull
+    uv sync
+    just install-agents
+    just agents-status
 
 # Install or refresh the launchd agents on this Mac
 [group('deploy')]

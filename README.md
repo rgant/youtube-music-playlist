@@ -447,7 +447,7 @@ main file alone loses those writes, and it still reports a plausible row count.
 ## Deploying to the Mac mini
 
 The mini runs the schedule. The laptop stays the development machine. Each later
-deploy is `git pull`, `uv sync`, and `just install-agents`.
+deploy is `just deploy-update`, run on the mini.
 
 `refresh` runs as a user-level LaunchAgent, and not as a LaunchDaemon. The
 catalogue path starts with `~`, and macOS grants local network access per user.
@@ -463,10 +463,19 @@ Prerequisites:
 - [Homebrew](https://brew.sh/) installed.
 - The Sonos speaker on the same network as the mini.
 
+Each command below runs on the mini, except the two `scp` lines. Run the mini
+commands from a terminal on its own screen. Screen sharing counts. A plain `ssh`
+session does not, because macOS raises two permission dialogs that only a GUI
+session can show.
+
+The clone uses the HTTPS URL, because the repository is public. The mini needs
+no GitHub key, and it never pushes.
+
 ```sh
-git clone <repo-url> ~/Programming/youtube-music-library-radio
+git clone https://github.com/rgant/youtube-music-playlist.git \
+  ~/Programming/youtube-music-library-radio
 cd ~/Programming/youtube-music-library-radio
-brew bundle    # uv, and the development tools
+brew bundle    # uv, just, and the other tools
 uv sync        # Python 3.14 and the dependencies
 ```
 
@@ -485,6 +494,13 @@ Then move the catalogue. Follow
 [The catalogue on another machine](#the-catalogue-on-another-machine). Write the
 snapshot on the laptop, copy that file, and put it at the path
 `YTM_RADIO_DATABASE_PATH` names.
+
+Make the directory on the mini before the copy. `scp` refuses a target directory
+that is absent.
+
+```sh
+mkdir -p ~/.local/share/youtube-music-library-radio
+```
 
 Archive the laptop catalogue after the move. One machine owns it. Two copies
 disagree about `last_queued`, `missing_count`, and `playlist_songs`, and both
@@ -536,7 +552,7 @@ the `logs` directory beside the catalogue.
 
 | Need                     | Command                                        |
 | ------------------------ | ---------------------------------------------- |
-| Deploy a new commit      | `git pull && uv sync && just install-agents`   |
+| Deploy a new commit      | `just deploy-update`                           |
 | Report the loaded agents | `just agents-status`                           |
 | Run `refresh` now        | `just agents-kick`                             |
 | Test the failure banner  | `just agents-notify-test`                      |
