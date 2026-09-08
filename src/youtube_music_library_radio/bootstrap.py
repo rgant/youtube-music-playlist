@@ -298,9 +298,7 @@ def bootstrap(conn: sqlite3.Connection, token: str, *, fetch: _Fetch = _http_get
     for playlist_id in playlist_ids:
         video_ids = playlist_video_ids(token, playlist_id, fetch=fetch)
         _logger.info("bootstrap: playlist %s holds %d video ids", playlist_id, len(video_ids))
-        songs.extend(
-            Song(video_id=video_id, title="", artist="") for video_id in video_ids
-        )
+        songs.extend(Song(video_id=video_id, title="", artist="") for video_id in video_ids)
 
     added = merge_songs(conn, songs)
     _logger.info("bootstrap: merged %d video ids, added %d new rows", len(songs), added)

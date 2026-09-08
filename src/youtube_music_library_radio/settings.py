@@ -20,6 +20,9 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     holds zero. A `trust_ratio` of zero trusts every read, including one that returns almost
     nothing.
 
+    `refresh_hour` and `refresh_minute` reach launchd, which reads each one as a clock position.
+    launchd rejects the whole plist for a value outside the day, and the mini then runs no refresh.
+
     One clear error at start-up is easier to correct than the downstream failure each fault causes
     minutes or hours later.
     """
@@ -30,12 +33,18 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     missing_threshold: int
     queue_size: int
     queue_window_days: int
+    refresh_hour: int
+    refresh_minute: int
+    harvest_tolerance: int
 
     def __post_init__(self) -> None:
         """Reject a value the rest of the project cannot act on."""
         _require_at_least(self.missing_threshold, 1, "missing_threshold", "MISSING_THRESHOLD")
         _require_at_least(self.queue_size, 1, "queue_size", "QUEUE_SIZE")
         _require_at_least(self.queue_window_days, 0, "queue_window_days", "QUEUE_WINDOW_DAYS")
+        _require_within(self.refresh_hour, range(24), "refresh_hour", "REFRESH_HOUR")
+        _require_within(self.refresh_minute, range(60), "refresh_minute", "REFRESH_MINUTE")
+        _require_at_least(self.harvest_tolerance, 0, "harvest_tolerance", "HARVEST_TOLERANCE")
         if not 0.0 < self.trust_ratio <= 1.0:
             message = f"trust_ratio must be above 0 and at most 1, not {self.trust_ratio}; set {_PREFIX}TRUST_RATIO"
             raise ValueError(message)
@@ -45,6 +54,13 @@ def _require_at_least(value: int, minimum: int, field: str, env_suffix: str) -> 
     """Raise `ValueError` naming `field` and its environment variable when `value` is below `minimum`."""
     if value < minimum:
         message = f"{field} must be {minimum} or more, not {value}; set {_PREFIX}{env_suffix}"
+        raise ValueError(message)
+
+
+def _require_within(value: int, limits: range, field: str, env_suffix: str) -> None:
+    """Raise `ValueError` naming `field` and its environment variable when `value` sits outside `limits`."""
+    if value not in limits:
+        message = f"{field} must be from {limits.start} to {limits.stop - 1}, not {value}; set {_PREFIX}{env_suffix}"
         raise ValueError(message)
 
 
@@ -101,4 +117,7 @@ def load_settings() -> Settings:
         missing_threshold=_env_int("MISSING_THRESHOLD", 3),
         queue_size=_env_int("QUEUE_SIZE", 500),
         queue_window_days=_env_int("QUEUE_WINDOW_DAYS", 7),
+        refresh_hour=_env_int("REFRESH_HOUR", 4),
+        refresh_minute=_env_int("REFRESH_MINUTE", 0),
+        harvest_tolerance=_env_int("HARVEST_TOLERANCE", 25),
     )

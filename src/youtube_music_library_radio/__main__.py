@@ -35,6 +35,7 @@ from youtube_music_library_radio.catalogue import (
 from youtube_music_library_radio.control import find_speaker, stop, transport_state
 from youtube_music_library_radio.harvest import harvest, read_queue
 from youtube_music_library_radio.logger import create_handler
+from youtube_music_library_radio.notify import notify
 from youtube_music_library_radio.playlists import (
     PLAYLIST_SIZE,
     apply_plan,
@@ -341,7 +342,7 @@ def _harvest(args: argparse.Namespace, *, speaker_fn: Callable[[str], object] = 
     _logger.info("the Sonos queue holds %d entries", len(entries))
 
     with contextlib.closing(open_catalogue(settings.database_path)) as conn:
-        result = harvest(conn, entries, playlist_title)
+        result = harvest(conn, entries, playlist_title, tolerance=settings.harvest_tolerance)
     _logger.info("harvest paired %d songs and left %d entries unplaced", len(result.pairs), len(result.unplaced))
     return 0
 
@@ -478,6 +479,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="library-radio",
         description="Keep a catalogue of the owner's YouTube Music library, and command a Sonos speaker.",
     )
+    # Only `refresh` offers `--notify`, and `main` reads `args.notify` for every subcommand.
+    parser.set_defaults(notify=False)
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="SUBCOMMAND")
 
     bootstrap_parser = subparsers.add_parser("bootstrap", help="fill an empty catalogue from the Everything N playlists")
@@ -529,6 +532,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     refresh_parser = subparsers.add_parser("refresh", help="merge the YouTube Music library into the catalogue")
+    _ = refresh_parser.add_argument(
+        "--notify",
+        action="store_true",
+        help="show a macOS notification banner after a failure. The LaunchAgent passes this flag",
+    )
     for headers_parser in (auth_parser, playlists_parser, refresh_parser):
         _ = headers_parser.add_argument(
             "--headers",
@@ -543,11 +551,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None, *, handlers: Mapping[str, _Handler] | None = None) -> int:
+def _notify_failure(args: argparse.Namespace, command: str, body: str, *, notify_fn: Callable[[str, str], bool]) -> None:
+    """Show a banner for a failed run that asked for one.
+
+    Only the LaunchAgent passes `--notify`. A terminal run already shows the fault, so a banner
+    there is noise.
+    """
+    if not typing.cast("bool", args.notify):
+        return
+    _ = notify_fn(f"library-radio {command} failed", body)
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    handlers: Mapping[str, _Handler] | None = None,
+    notify_fn: Callable[[str, str], bool] = notify,
+) -> int:
     """Run one subcommand and return its exit code.
 
     `argv` defaults to the arguments of this process. `handlers` replaces the handler table, so a
-    test can route a subcommand to a fake and reach neither the speaker nor the network.
+    test can route a subcommand to a fake and reach neither the speaker nor the network. `notify_fn`
+    replaces the banner, so a test shows nothing on the screen.
     """
     logging.basicConfig(level=logging.INFO, handlers=[create_handler()])
     parser = build_parser()
@@ -564,9 +589,13 @@ def main(argv: Sequence[str] | None = None, *, handlers: Mapping[str, _Handler] 
     handler = (_HANDLERS if handlers is None else handlers)[command]
     try:
         code = handler(args)
-    except _EXPECTED_FAILURES:
+    except _EXPECTED_FAILURES as exc:
         _logger.exception("%s failed", command)
+        _notify_failure(args, command, str(exc) or type(exc).__name__, notify_fn=notify_fn)
         return 1
+
+    if code != 0:
+        _notify_failure(args, command, f"{command} returned {code}", notify_fn=notify_fn)
     return code
 
 

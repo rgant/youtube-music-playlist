@@ -69,3 +69,28 @@ brew-check:
 clean:
     find . -type d \( -name __pycache__ -o -name .pytest_cache -o -name .mypy_cache -o -name .ruff_cache -o -name .basedpyright \) -exec rm -rf {} + 2>/dev/null || true
     find . -type f -name '*.pyc' -delete 2>/dev/null || true
+
+# Install or refresh the launchd agents on this Mac
+[group('deploy')]
+install-agents:
+    bash scripts/install_launchagents.sh
+
+# Remove the launchd agents from this Mac
+[group('deploy')]
+uninstall-agents:
+    bash scripts/uninstall_launchagents.sh
+
+# Report which launchd agents are loaded
+[group('deploy')]
+agents-status:
+    launchctl list | grep library-radio || echo "no library-radio agent is loaded"
+
+# Run the refresh agent now, and do not wait for its hour
+[group('deploy')]
+agents-kick:
+    launchctl kickstart -k "gui/$(id -u)/com.robgant.library-radio.refresh"
+
+# Show one test banner, so macOS asks for notification permission
+[group('deploy')]
+agents-notify-test:
+    osascript -e 'display notification "A failed refresh looks like this." with title "library-radio refresh failed"'

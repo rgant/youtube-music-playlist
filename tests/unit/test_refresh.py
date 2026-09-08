@@ -52,6 +52,7 @@ def _stored(conn: sqlite3.Connection) -> list[Song]:
     ids = {typing.cast("str", row["video_id"]) for row in rows}
     return songs_by_video_id(conn, ids)
 
+
 def _seeded_song(video_id: str) -> Song:
     """Build the row `bootstrap` seeds: a video ID with an empty title and an empty artist.
 

@@ -22,7 +22,6 @@ from youtube_music_library_radio.catalogue import (
     merge_songs,
     open_catalogue,
     pair_sonos_track,
-    playlist_of,
     record_playlists,
     songs_by_video_id,
     stored_playlists,
@@ -52,6 +51,7 @@ def _stored(conn: sqlite3.Connection) -> list[Song]:
     rows = typing.cast("list[sqlite3.Row]", conn.execute("SELECT video_id FROM songs").fetchall())
     ids = {typing.cast("str", row["video_id"]) for row in rows}
     return songs_by_video_id(conn, ids)
+
 
 def _song(video_id: str, *, title: str = "Title", artist: str = "Artist") -> Song:
     """Build a `Song` with sensible defaults for the fields a test does not care about."""
@@ -145,7 +145,6 @@ def test_merge_tolerates_a_duplicate_video_id_within_one_batch(conn: sqlite3.Con
 
     assert added == 2
     assert count_songs(conn) == 2
-
 
 
 def test_merge_fills_an_empty_title_from_the_incoming_row(conn: sqlite3.Connection) -> None:
@@ -249,16 +248,6 @@ def test_delete_accepts_more_ids_than_sqlite_allows_host_parameters(conn: sqlite
     assert [song.video_id for song in _stored(conn)] == ["keep"]
 
 
-
-
-
-
-
-
-
-
-
-
 def test_open_creates_the_playlist_tables(tmp_path: Path) -> None:
     """`playlists` and `harvest` read these tables on every run.
 
@@ -320,20 +309,6 @@ def test_stored_playlists_returns_the_accumulated_membership(conn: sqlite3.Conne
 def test_stored_playlists_is_empty_before_any_read(conn: sqlite3.Connection) -> None:
     """A catalogue that never read a playlist reports none, and that is not a failure."""
     assert not stored_playlists(conn)
-
-
-def test_playlist_of_names_the_lowest_ordinal_that_holds_the_song(conn: sqlite3.Connection) -> None:
-    """A song in two playlists reports the earlier one. The owner asked for the playlist that first held it."""
-    record_playlists(conn, [_playlist("PL9", "Everything 9", 9, ["dup"]), _playlist("PL2", "Everything 2", 2, ["dup"])])
-
-    assert playlist_of(conn, "dup") == "Everything 2"
-
-
-def test_playlist_of_returns_none_for_a_song_no_playlist_holds(conn: sqlite3.Connection) -> None:
-    """A video ID outside every playlist has no provenance, and that is not a failure."""
-    record_playlists(conn, [_playlist("PL1", "Everything 1", 1, ["a"])])
-
-    assert playlist_of(conn, "absent") is None
 
 
 def test_duplicated_video_ids_finds_a_song_in_two_playlists(conn: sqlite3.Connection) -> None:

@@ -186,8 +186,9 @@ repeated title, so no entry is ambiguous. Against the whole library the same
 rules collide.
 
 The command refuses a playlist the catalogue does not know. It also refuses a
-queue whose length is far from the playlist length. A wrong pool writes wrong
-pairings, and nothing later detects one.
+queue whose length sits more than `YTM_RADIO_HARVEST_TOLERANCE` from the
+playlist length. A wrong pool writes wrong pairings, and nothing later detects
+one.
 
 ### Pair from what the catalogue already saw
 
@@ -210,12 +211,12 @@ song and exactly one free track. A key that fits two songs, or two tracks, pairs
 nothing.
 
 Against the 1,752 pairs three real harvests made, the rule chose the same track
-1,700 times and a different one 6 times. All six name albums that Sonos re-keyed,
-so the song is right and the handle is old. A stale handle fails when the speaker
-plays it.
+1,700 times and a different one 6 times. All six name albums that Sonos
+re-keyed, so the song is right and the handle is old. A stale handle fails when
+the speaker plays it.
 
-`rematch` never changes a song that already carries a pairing. A harvest saw that
-song against one playlist, which is the stronger evidence.
+`rematch` never changes a song that already carries a pairing. A harvest saw
+that song against one playlist, which is the stronger evidence.
 
 ### Send a queue
 
@@ -284,10 +285,10 @@ uv run library-radio playlists --unpaired --commit
 ```
 
 Those songs already sit in a playlist, about 25 in each, so a harvest of every
-one of those playlists costs many rounds. This run repeats them on purpose, which
-the normal run refuses. It reads no library, because the catalogue already knows
-which songs carry no pairing. It never writes into an existing playlist, because
-a harvest already ran against those.
+one of those playlists costs many rounds. This run repeats them on purpose,
+which the normal run refuses. It reads no library, because the catalogue already
+knows which songs carry no pairing. It never writes into an existing playlist,
+because a harvest already ran against those.
 
 ### How it survives a short read
 
@@ -388,17 +389,24 @@ Copy the database before the first run with a new pattern. See
 
 Every setting reads an environment variable with the `YTM_RADIO_` prefix.
 
-| Variable                      | Default                                                        | Purpose                                         |
-| ----------------------------- | -------------------------------------------------------------- | ----------------------------------------------- |
-| `YTM_RADIO_DATABASE_PATH`     | `~/.local/share/youtube-music-library-radio/catalogue.sqlite3` | The catalogue file.                             |
-| `YTM_RADIO_SPEAKER_NAME`      | `Kitchen`                                                      | The name of the Sonos speaker.                  |
-| `YTM_RADIO_TRUST_RATIO`       | `0.9`                                                          | How much of the catalogue a read must return.   |
-| `YTM_RADIO_MISSING_THRESHOLD` | `3`                                                            | How many trusted reads remove an absent song.   |
-| `YTM_RADIO_QUEUE_SIZE`        | `500`                                                          | How many songs one Sonos queue holds.           |
-| `YTM_RADIO_QUEUE_WINDOW_DAYS` | `7`                                                            | How long a queued song stays out of the next.   |
+| Variable                      | Default                                                        | Purpose                                                    |
+| ----------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------- |
+| `YTM_RADIO_DATABASE_PATH`     | `~/.local/share/youtube-music-library-radio/catalogue.sqlite3` | The catalogue file.                                        |
+| `YTM_RADIO_SPEAKER_NAME`      | `Kitchen`                                                      | The name of the Sonos speaker.                             |
+| `YTM_RADIO_TRUST_RATIO`       | `0.9`                                                          | How much of the catalogue a read must return.              |
+| `YTM_RADIO_MISSING_THRESHOLD` | `3`                                                            | How many trusted reads remove an absent song.              |
+| `YTM_RADIO_QUEUE_SIZE`        | `500`                                                          | How many songs one Sonos queue holds.                      |
+| `YTM_RADIO_QUEUE_WINDOW_DAYS` | `7`                                                            | How long a queued song stays out of the next.              |
+| `YTM_RADIO_REFRESH_HOUR`      | `4`                                                            | The hour the LaunchAgent runs `refresh`.                   |
+| `YTM_RADIO_REFRESH_MINUTE`    | `0`                                                            | The minute the LaunchAgent runs `refresh`.                 |
+| `YTM_RADIO_HARVEST_TOLERANCE` | `25`                                                           | How far the queue length can sit from the playlist length. |
 
 `YTM_RADIO_QUEUE_WINDOW_DAYS` sets the window `catalogue.queueable_songs`
 excludes. A value of zero excludes nothing.
+
+`YTM_RADIO_REFRESH_HOUR` and `YTM_RADIO_REFRESH_MINUTE` reach launchd alone. No
+command reads a clock. See
+[Deploying to the Mac mini](#deploying-to-the-mac-mini).
 
 ## The Everything N playlists
 
@@ -435,6 +443,126 @@ Never copy `catalogue.sqlite3` with `cp`, `scp`, or `rsync` while a player runs.
 WAL journal mode holds recent writes in a separate `-wal` file. A copy of the
 main file alone loses those writes, and it still reports a plausible row count.
 `VACUUM INTO` writes one consistent file with no `-wal` companion.
+
+## Deploying to the Mac mini
+
+The mini runs the schedule. The laptop stays the development machine. Each later
+deploy is `git pull`, `uv sync`, and `just install-agents`.
+
+`refresh` runs as a user-level LaunchAgent, and not as a LaunchDaemon. The
+catalogue path starts with `~`, and macOS grants local network access per user.
+A root daemon has neither. So the mini needs auto-login and a session that stays
+open.
+
+### First-boot procedure
+
+Prerequisites:
+
+- A user account with auto-login and a GUI session that stays open.
+- Sleep turned off, so the agent fires at its hour.
+- [Homebrew](https://brew.sh/) installed.
+- The Sonos speaker on the same network as the mini.
+
+```sh
+git clone <repo-url> ~/Programming/youtube-music-library-radio
+cd ~/Programming/youtube-music-library-radio
+brew bundle    # uv, and the development tools
+uv sync        # Python 3.14 and the dependencies
+```
+
+Next copy the credential files from the laptop. Git ignores each one, so the
+clone carries none of them.
+
+```sh
+scp oauth.json client_secret.apps.googleusercontent.com.json browser.json \
+  <mini>:Programming/youtube-music-library-radio/
+```
+
+CAUTION: `browser.json` holds live Google account cookies. Copy it over your own
+network. Never put it into a chat, an issue, or a message.
+
+Then move the catalogue. Follow
+[The catalogue on another machine](#the-catalogue-on-another-machine). Write the
+snapshot on the laptop, copy that file, and put it at the path
+`YTM_RADIO_DATABASE_PATH` names.
+
+Archive the laptop catalogue after the move. One machine owns it. Two copies
+disagree about `last_queued`, `missing_count`, and `playlist_songs`, and both
+clear the same Sonos queue.
+
+Last, verify the deploy and start the agent.
+
+```sh
+uv run library-radio status    # the row count proves the catalogue moved
+just install-agents            # render the plist, then bootstrap it
+just agents-status             # confirm that launchd holds the label
+just agents-kick               # run refresh now, then read the log
+just agents-notify-test        # show one banner, then grant permission
+```
+
+Answer the notification prompt that `just agents-notify-test` raises. macOS asks
+one time. An unanswered prompt swallows every later banner, and a banner is the
+one sign of a failed refresh.
+
+`status` also reports the transport state, which needs the speaker on the LAN.
+Recent macOS releases ask for local network access the first time a program
+sends multicast. Answer that prompt from a terminal before you trust the
+schedule.
+
+### What the agent runs
+
+`just install-agents` fills the templates under `scripts/plists/` from the
+current settings and writes the result to `~/Library/LaunchAgents`. The label is
+`com.robgant.library-radio.refresh`. It runs `.venv/bin/library-radio refresh`
+at `YTM_RADIO_REFRESH_HOUR:REFRESH_MINUTE` each day.
+
+launchd gives the agent no shell. The render writes every value in
+[Settings](#settings) into the plist, so the agent and a terminal run act on the
+same values. After you change a setting, run `just install-agents` again.
+
+The plist names an absolute path for `--headers`, so it describes every file the
+agent reads. After you move the repository, run `just install-agents` again.
+
+The plist passes `--notify` as well. After a failure the command shows a macOS
+banner titled `library-radio refresh failed`, with the fault as its body. A
+terminal run omits the flag, because it prints the fault already.
+
+The agent writes its output to `refresh.stdout.log` and `refresh.stderr.log`, in
+the `logs` directory beside the catalogue.
+
+### Operations
+
+`<catalogue>` below is the directory that holds `catalogue.sqlite3`.
+
+| Need                     | Command                                        |
+| ------------------------ | ---------------------------------------------- |
+| Deploy a new commit      | `git pull && uv sync && just install-agents`   |
+| Report the loaded agents | `just agents-status`                           |
+| Run `refresh` now        | `just agents-kick`                             |
+| Test the failure banner  | `just agents-notify-test`                      |
+| Read the log             | `tail -f <catalogue>/logs/refresh.stderr.log`  |
+| Stop every agent         | `bash scripts/install_launchagents.sh --stop`  |
+| Start every agent        | `bash scripts/install_launchagents.sh --start` |
+| Remove every agent       | `just uninstall-agents`                        |
+| Send a Sonos queue       | `uv run library-radio queue --commit`          |
+
+Run the script directly for `--stop` and `--start`. A deploy that moves the
+catalogue must stop every agent first, and not write underneath a run.
+
+### What the schedule does not cover
+
+`queue --commit` is not an agent. It clears the Sonos queue first, so a
+scheduled run stops a song the speaker plays. Send a queue by hand.
+
+The failure banner needs a person at the mini. Nothing sends mail, and nothing
+raises an alarm on another machine. Browser cookies expire after some months,
+and `queue` keeps working from the paired songs. So a missed banner shows itself
+as "no new songs" alone. If a month passes with no new song, read
+`refresh.stderr.log`. See [Expired browser cookies](#expired-browser-cookies).
+
+`auth` needs Chrome and the clipboard. A headless mini has neither. Run `auth`
+on the laptop and copy the new `browser.json`. Or write the cURL capture to a
+file, copy that file, and run `library-radio auth --from-file PATH` on the mini.
 
 ## Development
 

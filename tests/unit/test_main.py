@@ -33,6 +33,7 @@ from youtube_music_library_radio.__main__ import (
     _auth,
     _bootstrap,
     _credential_text,
+    _harvest,
     _log_plan,
     _playlists,
     _refresh,
@@ -51,11 +52,11 @@ from youtube_music_library_radio.catalogue import (
     merge_songs,
     open_catalogue,
     pair_sonos_track,
-    playlist_of,
     record_playlists,
     record_sonos_track,
     stored_playlists,
 )
+from youtube_music_library_radio.harvest import HarvestError
 from youtube_music_library_radio.playlists import IncompleteReadError, PlannedWrite
 from youtube_music_library_radio.refresh import ExcludedSong, LibraryScan, RefreshResult, refresh
 
@@ -112,6 +113,7 @@ def _args(command: str, **fields: Path) -> argparse.Namespace:
 
 
 _FakeLibrary = FakeLibraryClient
+
 
 def _library_entry(video_id: str) -> dict[str, JSON]:
     """Build one `get_library_songs` entry, in the shape the live response uses."""
@@ -602,9 +604,7 @@ class _FakePlaylistClient:
 def _scan(*video_ids: str) -> LibraryScan:
     """Build a `LibraryScan` holding one song per video ID and no exclusion."""
     return LibraryScan(
-        songs=tuple(
-            Song(video_id=vid, title="A Title", artist="A Band") for vid in video_ids
-        ),
+        songs=tuple(Song(video_id=vid, title="A Title", artist="A Band") for vid in video_ids),
         excluded=(),
     )
 
@@ -638,7 +638,7 @@ def test_playlists_records_the_playlists_on_a_dry_run(catalogue_path: Path) -> N
     )
 
     with contextlib.closing(open_catalogue(catalogue_path)) as conn:
-        assert playlist_of(conn, "held") == "Everything 1"
+        assert [(item.title, item.video_ids) for item in stored_playlists(conn)] == [("Everything 1", ("held",))]
 
 
 @pytest.mark.usefixtures("catalogue_path")
@@ -689,8 +689,10 @@ def test_playlists_records_a_playlist_it_created(catalogue_path: Path) -> None:
     )
 
     with contextlib.closing(open_catalogue(catalogue_path)) as conn:
-        assert playlist_of(conn, "new") == "Everything 2"
-        assert [(item.title, item.reported_count) for item in stored_playlists(conn)] == [("Everything 1", 1), ("Everything 2", 1)]
+        assert [(item.title, item.reported_count, item.video_ids) for item in stored_playlists(conn)] == [
+            ("Everything 1", 1, ("held",)),
+            ("Everything 2", 1, ("new",)),
+        ]
 
 
 def test_playlists_records_a_song_it_added_to_an_existing_playlist(catalogue_path: Path) -> None:
@@ -706,7 +708,7 @@ def test_playlists_records_a_song_it_added_to_an_existing_playlist(catalogue_pat
     )
 
     with contextlib.closing(open_catalogue(catalogue_path)) as conn:
-        assert playlist_of(conn, "new") == "Everything 1"
+        assert [(item.title, item.video_ids) for item in stored_playlists(conn)] == [("Everything 1", ("held", "new"))]
 
 
 def test_an_incomplete_playlist_read_returns_non_zero(caplog: pytest.LogCaptureFixture) -> None:
@@ -911,3 +913,88 @@ def test_the_unpaired_plan_says_the_songs_need_a_pairing(caplog: pytest.LogCaptu
         _log_plan(plan, wanting="a Sonos pairing")
 
     assert "1 song(s) need a Sonos pairing, across 1 write(s)" in caplog.text
+
+
+class _BannerRecorder:
+    """Record each banner this run asks for, so no notification reaches the screen."""
+
+    def __init__(self) -> None:
+        """Start with no recorded banner."""
+        self.sent: list[tuple[str, str]] = []
+
+    def __call__(self, title: str, body: str) -> bool:
+        """Record one banner and report that it appeared."""
+        self.sent.append((title, body))
+        return True
+
+
+def test_notify_sends_a_banner_when_a_handler_raises() -> None:
+    """`--notify` is the one sign the owner gets of a scheduled run that failed.
+
+    The LaunchAgent writes its fault into a log nobody reads, and `queue` keeps working from the
+    songs that already carry a pairing.
+    """
+    banner = _BannerRecorder()
+
+    def _fails(_args: argparse.Namespace) -> int:
+        message = "browser.json returned no songs"
+        raise MissingHeadersError(message)
+
+    code = main(["refresh", "--notify"], handlers={"refresh": _fails}, notify_fn=banner)
+
+    assert code != 0
+    assert banner.sent == [("library-radio refresh failed", "browser.json returned no songs")]
+
+
+def test_notify_sends_a_banner_for_a_non_zero_return() -> None:
+    """A handler reports an expected failure by its return value, which is as silent as an exception."""
+    banner = _BannerRecorder()
+
+    code = main(["refresh", "--notify"], handlers={"refresh": lambda _args: 3}, notify_fn=banner)
+
+    assert code == 3
+    assert banner.sent == [("library-radio refresh failed", "refresh returned 3")]
+
+
+def test_no_banner_reaches_a_run_that_did_not_ask_for_one() -> None:
+    """A terminal run shows the fault already, so a banner there is noise the owner did not ask for."""
+    banner = _BannerRecorder()
+
+    code = main(["refresh"], handlers={"refresh": lambda _args: 3}, notify_fn=banner)
+
+    assert code == 3
+    assert not banner.sent
+
+
+def test_no_banner_reaches_a_run_that_succeeded() -> None:
+    """A daily refresh that works must stay silent. A banner every morning teaches the owner to ignore it."""
+    banner = _BannerRecorder()
+
+    code = main(["refresh", "--notify"], handlers={"refresh": lambda _args: 0}, notify_fn=banner)
+
+    assert code == 0
+    assert not banner.sent
+
+
+def test_harvest_reads_the_tolerance_from_the_settings(catalogue_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The gap between the queue and the playlist is what stops a harvest against the wrong pool.
+
+    An owner who meets a legitimate gap must change a variable, and not the code.
+    """
+    monkeypatch.setenv("YTM_RADIO_HARVEST_TOLERANCE", "0")
+    with contextlib.closing(open_catalogue(catalogue_path)) as conn:
+        record_playlists(
+            conn,
+            [PlaylistMembership(playlist_id="PL1", title="Everything 1", ordinal=1, reported_count=1, video_ids=("a",))],
+        )
+
+    class _EmptyQueue:
+        """A speaker whose queue holds nothing, so the gap is the playlist length."""
+
+        def get_queue(self, start: int = 0, max_items: int = 100) -> list[object]:
+            """Return no queue entry."""
+            del start, max_items
+            return []
+
+    with pytest.raises(HarvestError, match="tolerance of 0"):
+        _ = _harvest(argparse.Namespace(playlist="Everything 1"), speaker_fn=lambda _name: _EmptyQueue())

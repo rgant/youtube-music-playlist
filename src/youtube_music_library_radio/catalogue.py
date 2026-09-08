@@ -261,30 +261,6 @@ def stored_playlists(conn: sqlite3.Connection) -> tuple[PlaylistMembership, ...]
     return tuple(found)
 
 
-def playlist_of(conn: sqlite3.Connection, video_id: str) -> str | None:
-    """Return the title of the lowest-ordinal playlist that holds `video_id`, or None.
-
-    The lowest ordinal is the playlist that first held the song, because `plan_writes` fills the
-    playlists in order. A song in two playlists therefore reports the earlier one.
-    """
-    row = typing.cast(
-        "sqlite3.Row | None",
-        conn.execute(
-            """
-            SELECT playlists.title FROM playlist_songs
-            JOIN playlists ON playlists.playlist_id = playlist_songs.playlist_id
-            WHERE playlist_songs.video_id = ?
-            ORDER BY playlists.ordinal
-            LIMIT 1
-            """,
-            (video_id,),
-        ).fetchone(),
-    )
-    if row is None:
-        return None
-    return typing.cast("str", row[0])
-
-
 def duplicated_video_ids(conn: sqlite3.Connection) -> dict[str, list[str]]:
     """Return each video ID that sits in more than one playlist, with the titles in ordinal order."""
     rows = typing.cast(
@@ -484,9 +460,6 @@ def delete_songs(conn: sqlite3.Connection, video_ids: Iterable[str]) -> int:
 
     cursor = conn.executemany("DELETE FROM songs WHERE video_id = :video_id", params)
     return cursor.rowcount
-
-
-
 
 
 def count_songs(conn: sqlite3.Connection) -> int:
