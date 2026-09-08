@@ -32,9 +32,14 @@ is Google's own integration, and playback through it carries no such risk.
 
 ## Requirements
 
-The machine that runs these commands needs `uv` alone. The other Homebrew tools
-in the `Brewfile` serve development: `just`, `dprint`, `markdownlint-cli`,
+The machine that runs these commands needs `uv` and `just`. The other Homebrew
+tools in the `Brewfile` serve development: `dprint`, `markdownlint-cli`,
 `shellcheck`, and `shfmt`.
+
+`uv` downloads its own Python, because `pyproject.toml` sets
+`python-preference = "only-managed"`. A Homebrew Python does not serve this
+project. See
+[Sonos discovery and the macOS firewall](#sonos-discovery-and-the-macos-firewall).
 
 ## Setup
 
@@ -463,10 +468,7 @@ Prerequisites:
 - [Homebrew](https://brew.sh/) installed.
 - The Sonos speaker on the same network as the mini.
 
-Each command below runs on the mini, except the two `scp` lines. Run the mini
-commands from a terminal on its own screen. Screen sharing counts. A plain `ssh`
-session does not, because macOS raises two permission dialogs that only a GUI
-session can show.
+Each command below runs on the mini, except the `scp` lines.
 
 The clone uses the HTTPS URL, because the repository is public. The mini needs
 no GitHub key, and it never pushes.
@@ -475,9 +477,19 @@ no GitHub key, and it never pushes.
 git clone https://github.com/rgant/youtube-music-playlist.git \
   ~/Programming/youtube-music-library-radio
 cd ~/Programming/youtube-music-library-radio
-brew bundle    # uv, just, and the other tools
-uv sync        # Python 3.14 and the dependencies
+brew install uv just    # the two tools the runtime needs
+uv sync                 # Python 3.14 and the dependencies
 ```
+
+Do not run `brew bundle` on the mini. It also installs `dprint` and
+`markdownlint-cli`, which serve development alone. Homebrew ships no bottle for
+an Intel Mac, so each one builds from source. `markdownlint-cli` pulls a `node`
+build of more than an hour.
+
+`uv sync` downloads a managed interpreter, because `pyproject.toml` sets
+`python-preference = "only-managed"`. Read
+[Sonos discovery and the macOS firewall](#sonos-discovery-and-the-macos-firewall)
+for the reason.
 
 Next copy the credential files from the laptop. Git ignores each one, so the
 clone carries none of them.
@@ -516,14 +528,52 @@ just agents-kick               # run refresh now, then read the log
 just agents-notify-test        # show one banner, then grant permission
 ```
 
-Answer the notification prompt that `just agents-notify-test` raises. macOS asks
-one time. An unanswered prompt swallows every later banner, and a banner is the
-one sign of a failed refresh.
+`status` reports the row count first, then the transport state. If it names the
+speaker, the firewall already accepts the interpreter. If it reports
+`Discovery found: none`, read
+[Sonos discovery and the macOS firewall](#sonos-discovery-and-the-macos-firewall).
 
-`status` also reports the transport state, which needs the speaker on the LAN.
-Recent macOS releases ask for local network access the first time a program
-sends multicast. Answer that prompt from a terminal before you trust the
-schedule.
+Answer the notification prompt that `just agents-notify-test` raises. macOS asks
+one time, and it draws the dialog on the screen of the mini. An `ssh` session
+shows nothing, so watch that screen over screen sharing. An unanswered prompt
+swallows every later banner, and a banner is the one sign of a failed refresh.
+
+### Sonos discovery and the macOS firewall
+
+`soco` finds the speaker with SSDP, which is multicast UDP. The macOS
+application firewall accepts the reply only when the running interpreter meets
+both of these conditions:
+
+- The binary carries a code signature.
+- The binary sits on the firewall allow list.
+
+Either one alone fails. The failure looks like
+`RuntimeError: no speaker named 'Kitchen' found. Discovery found: none`, and
+`curl http://<speaker>:1400/status/zp` still answers `200`. The firewall gates
+incoming connections alone.
+
+`pyproject.toml` sets `python-preference = "only-managed"` for the first
+condition. Homebrew builds Python from source on a Mac that no bottle covers,
+and a local build signs nothing. That build is also a 32 KB stub beside a
+separate dylib, and a signature on the pair does not satisfy the firewall. A
+managed interpreter is one self-contained file that an ad-hoc signature covers.
+
+Meet the second condition once, on the mini:
+
+```sh
+PY="$(readlink .venv/bin/python)"
+codesign --force --sign - "${PY}"
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "${PY}"
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "${PY}"
+uv run library-radio status
+```
+
+`uv python upgrade` writes a new unsigned binary, so discovery can stop again.
+macOS can raise its own dialog for the new binary on the screen of the mini.
+Answer that dialog. If discovery still fails, run the commands above again.
+
+`refresh` never reads the speaker, so the schedule survives a lapse. `queue`,
+`harvest`, `stop`, and `status` all stop.
 
 ### What the agent runs
 

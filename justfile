@@ -73,10 +73,7 @@ clean:
 # Update this Mac to the pushed code, then restart the agents. Run it on the mini
 [group('deploy')]
 deploy-update:
-    git pull
-    uv sync
-    just install-agents
-    just agents-status
+    bash scripts/deploy_update.sh
 
 # Install or refresh the launchd agents on this Mac
 [group('deploy')]

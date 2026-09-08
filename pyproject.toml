@@ -33,6 +33,13 @@ dev = [
   "ruff>=0.16.6",
 ]
 
+[tool.uv]
+# Homebrew builds Python from source on a Mac that no bottle covers, and a local build signs
+# nothing. The macOS application firewall accepts an inbound SSDP reply only from a signed binary,
+# so an unsigned interpreter finds no Sonos speaker. A managed build is one self-contained file that
+# an ad-hoc signature covers. See "Sonos discovery and the macOS firewall" in the README.
+python-preference = "only-managed"
+
 # Tool Configuration
 [tool.ruff]
 target-version = "py314"
