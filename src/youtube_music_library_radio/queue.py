@@ -9,17 +9,19 @@ trades variety against repetition without a code change.
 """
 
 import logging
+import time
 import typing
 import urllib.parse
 
 from soco.data_structures import DidlMusicTrack, DidlResource
+from soco.exceptions import SoCoUPnPException
 
 from youtube_music_library_radio.catalogue import queueable_songs
 
 if typing.TYPE_CHECKING:
     import random
     import sqlite3
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from youtube_music_library_radio.catalogue import Song
 
@@ -32,6 +34,14 @@ _SERVICE_TYPE_OFFSET = 7
 
 # What a Sonos item id carries in front of the track id of a music service track.
 _TRACK_ID_PREFIX = "10032020"
+
+# How many times `send_queue` offers one track to the speaker. The refusal is transient, and a
+# second offer of a refused track was taken every time it was measured.
+_ADD_ATTEMPTS = 3
+
+# How long `send_queue` waits before it offers a refused track again. An immediate retry reaches
+# the same busy service. The pause costs about 2 seconds for each refusal in a queue of hundreds.
+_ADD_RETRY_SECONDS = 1.0
 
 
 class NotEnoughSongsError(RuntimeError):
@@ -104,20 +114,52 @@ def _described(song: Song) -> DidlMusicTrack:
     )
 
 
-def send_queue(speaker: Speaker, songs: Sequence[Song]) -> int:
-    """Replace the speaker's queue with `songs`. Return how many tracks reached it.
+def _offer(speaker: Speaker, song: Song, *, sleep_fn: Callable[[float], None]) -> bool:
+    """Offer one song to the speaker, up to `_ADD_ATTEMPTS` times. Return True when it took the song.
+
+    The speaker refuses a track now and then with UPnP error 800, and it takes that same track on a
+    later attempt. So a refusal costs a pause, and it costs the queue nothing.
+    """
+    for attempt in range(1, _ADD_ATTEMPTS + 1):
+        try:
+            _ = speaker.add_to_queue(_described(song))
+        except SoCoUPnPException as exc:
+            # The URI is the only handle a later look at this song has, so each line carries it.
+            _logger.warning(
+                "the speaker refused %s - %s on attempt %d (UPnP %s). %s",
+                song.artist,
+                song.title,
+                attempt,
+                exc.error_code,
+                song.sonos_uri,
+            )
+            if attempt < _ADD_ATTEMPTS:
+                sleep_fn(_ADD_RETRY_SECONDS)
+        else:
+            return True
+    return False
+
+
+def send_queue(speaker: Speaker, songs: Sequence[Song], *, sleep_fn: Callable[[float], None] = time.sleep) -> tuple[Song, ...]:
+    """Replace the speaker's queue with `songs`. Return the songs the speaker took.
 
     Clears the queue first. A new sample replaces what the speaker holds. An add onto a full queue
     grows it without limit.
 
+    The speaker refuses about 7 adds in 100 during a send of hundreds. `_offer` answers each one
+    with a pause and another attempt. A song refused every attempt is skipped. One track must not
+    empty a whole queue.
+
+    The caller marks only the returned songs as queued. A skipped song never played, and the refusal
+    is transient, so the song stays eligible for the next queue.
+
     A song with no `sonos_uri` never reaches here, because `pick_queue` returns none.
     """
     speaker.clear_queue()
-    sent = 0
-    for song in songs:
-        if song.sonos_uri is None:
-            continue
-        _ = speaker.add_to_queue(_described(song))
-        sent += 1
-    _logger.info("the queue now holds %d tracks", sent)
-    return sent
+    sent = [song for song in songs if song.sonos_uri is not None and _offer(speaker, song, sleep_fn=sleep_fn)]
+
+    skipped = len(songs) - len(sent)
+    if skipped:
+        _logger.warning("the speaker took none of %d tracks after %d attempts each", skipped, _ADD_ATTEMPTS)
+    _logger.info("the queue now holds %d tracks", len(sent))
+    return tuple(sent)

@@ -146,3 +146,27 @@ def test_settings_reject_a_negative_harvest_tolerance(monkeypatch: pytest.Monkey
 
     with pytest.raises(ValueError, match=r"harvest_tolerance.*YTM_RADIO_HARVEST_TOLERANCE"):
         _ = load_settings()
+
+
+def test_queue_hour_and_minute_carry_defaults() -> None:
+    """The queue LaunchAgent reads its schedule from these, and no command reads a clock."""
+    settings = load_settings()
+
+    assert settings.queue_hour == 5
+    assert settings.queue_minute == 0
+
+
+def test_settings_reject_a_queue_hour_outside_the_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A plist names `Hour` as a clock position. launchd never fires an agent that names hour 24."""
+    monkeypatch.setenv("YTM_RADIO_QUEUE_HOUR", "24")
+
+    with pytest.raises(ValueError, match=r"queue_hour.*YTM_RADIO_QUEUE_HOUR"):
+        _ = load_settings()
+
+
+def test_settings_reject_a_queue_minute_outside_the_hour(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A plist names `Minute` as a clock position, and 60 is not one."""
+    monkeypatch.setenv("YTM_RADIO_QUEUE_MINUTE", "60")
+
+    with pytest.raises(ValueError, match=r"queue_minute.*YTM_RADIO_QUEUE_MINUTE"):
+        _ = load_settings()

@@ -5,17 +5,26 @@ repeatable and its tests need no double. `send_queue` runs against a fake speake
 call, so no test reaches the network.
 """
 
+import logging
 import random
 import typing
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from soco.exceptions import SoCoUPnPException
 
 from youtube_music_library_radio.catalogue import Song, mark_queued, merge_songs, pair_sonos_track
-from youtube_music_library_radio.queue import NotEnoughSongsError, pick_queue, send_queue
+from youtube_music_library_radio.queue import (
+    _ADD_ATTEMPTS,
+    _ADD_RETRY_SECONDS,
+    NotEnoughSongsError,
+    pick_queue,
+    send_queue,
+)
 
 if typing.TYPE_CHECKING:
     import sqlite3
+    from collections.abc import Mapping
 
     from soco.data_structures import DidlMusicTrack
 
@@ -97,26 +106,37 @@ def test_one_seed_chooses_the_same_songs(conn: sqlite3.Connection) -> None:
     assert first == second
 
 
-class _FakeSpeaker:
-    """A `soco.SoCo` double that records the queue calls, and can fail on demand."""
+# How many times a fake refuses a URI that never comes back. Any number above `_ADD_ATTEMPTS` does.
+_ALWAYS = 99
 
-    def __init__(self, *, fail_at: int | None = None) -> None:
+
+class _FakeSpeaker:
+    """A `soco.SoCo` double that records the queue calls, and refuses each URI a set number of times.
+
+    A real speaker refuses now and then and takes the same track later, so the count models that.
+    """
+
+    def __init__(self, *, refusals: Mapping[str, int] | None = None) -> None:
         self.cleared: int = 0
         self.added: list[str] = []
         self.items: list[DidlMusicTrack] = []
-        self._fail_at: int | None = fail_at
+        self.attempts: list[str] = []
+        self._refusals: dict[str, int] = dict(refusals or {})
 
     def clear_queue(self) -> None:
         """Record the clear."""
         self.cleared += 1
 
     def add_to_queue(self, queueable_item: DidlMusicTrack) -> int:
-        """Record the addition, or raise once the failure point is reached."""
-        if self._fail_at is not None and len(self.added) >= self._fail_at:
-            message = "the speaker refused the track"
-            raise OSError(message)
+        """Record the addition, or refuse while this URI has refusals left."""
+        uri = queueable_item.resources[0].uri
+        self.attempts.append(uri)
+        left = self._refusals.get(uri, 0)
+        if left > 0:
+            self._refusals[uri] = left - 1
+            raise SoCoUPnPException(message="UPnP Error 800 received", error_code="800", error_xml="")
         self.items.append(queueable_item)
-        self.added.append(queueable_item.resources[0].uri)
+        self.added.append(uri)
         return len(self.added)
 
 
@@ -128,9 +148,35 @@ def test_send_queue_clears_then_adds_every_track(conn: sqlite3.Connection) -> No
 
     sent = send_queue(speaker, songs)
 
-    assert sent == 3
+    assert sent == (songs[0], songs[1], songs[2])
     assert speaker.cleared == 1
     assert len(speaker.added) == 3
+
+
+def test_send_queue_returns_the_songs_the_speaker_took(conn: sqlite3.Connection) -> None:
+    """A refused track must not stop the send. The measured refusal rate is above 7 percent."""
+    _paired(conn, 3)
+    songs = pick_queue(conn, size=3, window_days=7, rng=random.Random(1))
+    speaker = _FakeSpeaker(refusals={typing.cast("str", songs[1].sonos_uri): _ALWAYS})
+
+    sent = send_queue(speaker, songs, sleep_fn=lambda _seconds: None)
+
+    assert sent == (songs[0], songs[2])
+    assert len(speaker.added) == 2
+
+
+def test_send_queue_logs_the_song_the_speaker_refused(conn: sqlite3.Connection, caplog: pytest.LogCaptureFixture) -> None:
+    """The log line is the only record of a dead pairing, and it measures how many exist."""
+    _paired(conn, 2)
+    songs = pick_queue(conn, size=2, window_days=7, rng=random.Random(1))
+    refused = songs[0]
+    speaker = _FakeSpeaker(refusals={typing.cast("str", refused.sonos_uri): _ALWAYS})
+
+    with caplog.at_level(logging.WARNING):
+        _ = send_queue(speaker, songs, sleep_fn=lambda _seconds: None)
+
+    assert refused.title in caplog.text
+    assert typing.cast("str", refused.sonos_uri) in caplog.text
 
 
 def test_mark_queued_records_the_time(conn: sqlite3.Connection) -> None:
@@ -174,3 +220,41 @@ def test_the_item_names_the_music_service_of_the_uri(conn: sqlite3.Connection) -
     _ = send_queue(speaker, pick_queue(conn, size=1, window_days=7, rng=random.Random(1)))
 
     assert speaker.items[0].desc == "SA_RINCON72711_X_#Svc72711-0-Token"
+
+
+def test_send_queue_retries_a_track_the_speaker_refused_once(conn: sqlite3.Connection) -> None:
+    """The refusal is transient. A song lost to one of them costs the owner a track it can keep."""
+    _paired(conn, 2)
+    songs = pick_queue(conn, size=2, window_days=7, rng=random.Random(1))
+    flaky = typing.cast("str", songs[0].sonos_uri)
+    speaker = _FakeSpeaker(refusals={flaky: 1})
+
+    sent = send_queue(speaker, songs, sleep_fn=lambda _seconds: None)
+
+    assert sent == (songs[0], songs[1])
+    assert speaker.attempts.count(flaky) == 2
+
+
+def test_send_queue_waits_between_two_attempts(conn: sqlite3.Connection) -> None:
+    """An immediate retry reaches the same busy service. The pause is what makes the retry work."""
+    _paired(conn, 1)
+    songs = pick_queue(conn, size=1, window_days=7, rng=random.Random(1))
+    speaker = _FakeSpeaker(refusals={typing.cast("str", songs[0].sonos_uri): 1})
+    waited: list[float] = []
+
+    _ = send_queue(speaker, songs, sleep_fn=waited.append)
+
+    assert waited == [_ADD_RETRY_SECONDS]
+
+
+def test_send_queue_gives_up_after_the_last_attempt(conn: sqlite3.Connection) -> None:
+    """A song that refuses every attempt must not hold up the rest of the queue."""
+    _paired(conn, 2)
+    songs = pick_queue(conn, size=2, window_days=7, rng=random.Random(1))
+    dead = typing.cast("str", songs[0].sonos_uri)
+    speaker = _FakeSpeaker(refusals={dead: _ALWAYS})
+
+    sent = send_queue(speaker, songs, sleep_fn=lambda _seconds: None)
+
+    assert sent == (songs[1],)
+    assert speaker.attempts.count(dead) == _ADD_ATTEMPTS

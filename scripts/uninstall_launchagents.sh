@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # Matches `AGENTS` in install_launchagents.sh.
-AGENTS=(refresh)
+AGENTS=(refresh queue)
 LAUNCHAGENTS_DIR="${HOME}/Library/LaunchAgents"
 UID_NUM="$(id -u)"
 

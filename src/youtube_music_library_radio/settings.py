@@ -35,6 +35,8 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     queue_window_days: int
     refresh_hour: int
     refresh_minute: int
+    queue_hour: int
+    queue_minute: int
     harvest_tolerance: int
 
     def __post_init__(self) -> None:
@@ -44,6 +46,8 @@ class Settings:  # pylint: disable=too-many-instance-attributes
         _require_at_least(self.queue_window_days, 0, "queue_window_days", "QUEUE_WINDOW_DAYS")
         _require_within(self.refresh_hour, range(24), "refresh_hour", "REFRESH_HOUR")
         _require_within(self.refresh_minute, range(60), "refresh_minute", "REFRESH_MINUTE")
+        _require_within(self.queue_hour, range(24), "queue_hour", "QUEUE_HOUR")
+        _require_within(self.queue_minute, range(60), "queue_minute", "QUEUE_MINUTE")
         _require_at_least(self.harvest_tolerance, 0, "harvest_tolerance", "HARVEST_TOLERANCE")
         if not 0.0 < self.trust_ratio <= 1.0:
             message = f"trust_ratio must be above 0 and at most 1, not {self.trust_ratio}; set {_PREFIX}TRUST_RATIO"
@@ -119,5 +123,7 @@ def load_settings() -> Settings:
         queue_window_days=_env_int("QUEUE_WINDOW_DAYS", 7),
         refresh_hour=_env_int("REFRESH_HOUR", 4),
         refresh_minute=_env_int("REFRESH_MINUTE", 0),
+        queue_hour=_env_int("QUEUE_HOUR", 5),
+        queue_minute=_env_int("QUEUE_MINUTE", 0),
         harvest_tolerance=_env_int("HARVEST_TOLERANCE", 25),
     )

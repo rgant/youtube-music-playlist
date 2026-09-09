@@ -22,6 +22,8 @@ def _settings(tmp_path: Path) -> Settings:
         queue_window_days=14,
         refresh_hour=6,
         refresh_minute=30,
+        queue_hour=7,
+        queue_minute=45,
         harvest_tolerance=40,
     )
 
@@ -65,8 +67,41 @@ def test_substitutions_carry_every_runtime_setting(tmp_path: Path) -> None:
 
 def test_substitutions_reject_an_unknown_agent(tmp_path: Path) -> None:
     """A name in `_AGENT_NAMES` with no branch here renders nothing, and the install reports success."""
-    with pytest.raises(ValueError, match="queue"):
-        _ = render_plists._substitutions_for("queue", settings=_settings(tmp_path), repo_dir=tmp_path)
+    with pytest.raises(ValueError, match="harvest"):
+        _ = render_plists._substitutions_for("harvest", settings=_settings(tmp_path), repo_dir=tmp_path)
+
+
+def test_substitutions_carry_the_queue_hour_and_minute(tmp_path: Path) -> None:
+    """The queue agent reads its schedule from the plist alone, and no command reads a clock."""
+    subs = render_plists._substitutions_for("queue", settings=_settings(tmp_path), repo_dir=tmp_path)
+
+    assert subs["__HOUR__"] == "7"
+    assert subs["__MINUTE__"] == "45"
+
+
+def test_the_queue_agent_has_a_template_and_a_name(tmp_path: Path) -> None:
+    """The owner asked for a queue that fills itself, so `queue` must reach launchd like `refresh`."""
+    written = render_plists.render(output_dir=tmp_path / "agents", settings=_settings(tmp_path))
+
+    assert "queue" in render_plists._AGENT_NAMES
+    assert [path.name for path in written].count("com.robgant.library-radio.queue.plist") == 1
+
+
+def test_the_rendered_queue_plist_sends_the_queue_and_asks_for_a_banner(tmp_path: Path) -> None:
+    """Without `--commit` the agent prints a sample and changes nothing, which is a silent no-op."""
+    written = render_plists.render(output_dir=tmp_path / "agents", settings=_settings(tmp_path))
+    content = next(path for path in written if path.name.endswith("queue.plist")).read_text(encoding="utf-8")
+
+    assert "<string>--commit</string>" in content
+    assert "<string>--notify</string>" in content
+
+
+def test_the_rendered_queue_plist_runs_on_two_days_each_month(tmp_path: Path) -> None:
+    """The owner asked for every two weeks. launchd offers a day of the month, and no fortnight."""
+    written = render_plists.render(output_dir=tmp_path / "agents", settings=_settings(tmp_path))
+    content = next(path for path in written if path.name.endswith("queue.plist")).read_text(encoding="utf-8")
+
+    assert content.count("<key>Day</key>") == 2
 
 
 def test_render_writes_one_plist_for_each_agent(tmp_path: Path) -> None:

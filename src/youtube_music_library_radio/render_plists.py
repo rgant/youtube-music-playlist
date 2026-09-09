@@ -24,7 +24,7 @@ _logger = logging.getLogger(__name__)
 
 # `install_launchagents.sh` bootstraps this same list. A new agent needs a name here, a branch in
 # `_substitutions_for`, a template file, and the same name in that script.
-_AGENT_NAMES: tuple[str, ...] = ("refresh",)
+_AGENT_NAMES: tuple[str, ...] = ("refresh", "queue")
 _LABEL_PREFIX = "com.robgant.library-radio"
 # The logs sit beside the catalogue, so one directory holds every file the agent owns.
 _LOG_DIRNAME = "logs"
@@ -52,15 +52,20 @@ def _substitutions_for(agent: str, *, settings: Settings, repo_dir: Path) -> dic
 
     Raises `ValueError` for an agent name this function has no table for.
     """
-    if agent != "refresh":
+    hours = {
+        "refresh": (settings.refresh_hour, settings.refresh_minute),
+        "queue": (settings.queue_hour, settings.queue_minute),
+    }
+    if agent not in hours:
         message = f"unknown agent {agent!r}"
         raise ValueError(message)
+    hour, minute = hours[agent]
 
     return {
         "__REPO_DIR__": str(repo_dir),
         "__LOG_DIR__": str(_log_dir(settings)),
-        "__HOUR__": str(settings.refresh_hour),
-        "__MINUTE__": str(settings.refresh_minute),
+        "__HOUR__": str(hour),
+        "__MINUTE__": str(minute),
         "__DATABASE_PATH__": str(settings.database_path),
         "__SPEAKER_NAME__": settings.speaker_name,
         "__TRUST_RATIO__": str(settings.trust_ratio),

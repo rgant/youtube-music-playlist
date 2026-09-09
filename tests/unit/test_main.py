@@ -24,9 +24,11 @@ import typing
 from pathlib import Path
 
 import pytest
+from soco.exceptions import SoCoUPnPException
 from ytmusicapi.exceptions import YTMusicServerError
 
 from testdoubles import FakeLibraryClient
+from youtube_music_library_radio import queue as queue_module
 from youtube_music_library_radio.__main__ import (
     _AUTH_PROBE_LIMIT,
     _HANDLERS,
@@ -36,10 +38,12 @@ from youtube_music_library_radio.__main__ import (
     _harvest,
     _log_plan,
     _playlists,
+    _queue,
     _refresh,
     _rematch,
     _status,
     _stop,
+    build_parser,
     main,
 )
 from youtube_music_library_radio.authheaders import MissingHeadersError
@@ -63,6 +67,8 @@ from youtube_music_library_radio.refresh import ExcludedSong, LibraryScan, Refre
 if typing.TYPE_CHECKING:
     import sqlite3
     from collections.abc import Callable
+
+    from soco.data_structures import DidlMusicTrack
 
     from youtube_music_library_radio.jsonshape import JSON
     from youtube_music_library_radio.settings import Settings
@@ -979,7 +985,7 @@ def test_no_banner_reaches_a_run_that_succeeded() -> None:
 def test_harvest_reads_the_tolerance_from_the_settings(catalogue_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The gap between the queue and the playlist is what stops a harvest against the wrong pool.
 
-    An owner who meets a legitimate gap must change a variable, and not the code.
+    An owner with a legitimate gap must change a variable, and not the code.
     """
     monkeypatch.setenv("YTM_RADIO_HARVEST_TOLERANCE", "0")
     with contextlib.closing(open_catalogue(catalogue_path)) as conn:
@@ -998,3 +1004,50 @@ def test_harvest_reads_the_tolerance_from_the_settings(catalogue_path: Path, mon
 
     with pytest.raises(HarvestError, match="tolerance of 0"):
         _ = _harvest(argparse.Namespace(playlist="Everything 1"), speaker_fn=lambda _name: _EmptyQueue())
+
+
+class _RefusingSpeaker:
+    """A speaker that refuses one named URI, as a real one refuses a track its service dropped."""
+
+    def __init__(self, refuse: str) -> None:
+        self.added: list[str] = []
+        self._refuse: str = refuse
+
+    def clear_queue(self) -> None:
+        """Accept the clear."""
+
+    def add_to_queue(self, queueable_item: DidlMusicTrack) -> int:
+        """Record the addition, or refuse the one dead URI."""
+        uri = queueable_item.resources[0].uri
+        if uri == self._refuse:
+            raise SoCoUPnPException(message="UPnP Error 800 received", error_code="800", error_xml="")
+        self.added.append(uri)
+        return len(self.added)
+
+
+def test_queue_leaves_a_refused_song_eligible(catalogue_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A refused song never played. A cooldown it did not earn keeps it out for a week."""
+    monkeypatch.setenv("YTM_RADIO_QUEUE_SIZE", "2")
+    # The retry pause is real time. The refusal path here needs the retry, and not the wait.
+    monkeypatch.setattr(queue_module, "_ADD_RETRY_SECONDS", 0.0)
+    with contextlib.closing(open_catalogue(catalogue_path)) as conn:
+        _ = merge_songs(conn, [Song(video_id=f"V{index}", title=f"Song {index}", artist="A Band") for index in range(2)])
+        for index in range(2):
+            _ = pair_sonos_track(conn, f"V{index}", track_id=f"S{index}", uri=f"x-sonosapi-hls-static:S{index}?sid=284&flags=0&sn=7")
+
+    speaker = _RefusingSpeaker("x-sonosapi-hls-static:S1?sid=284&flags=0&sn=7")
+    assert _queue(argparse.Namespace(commit=True), speaker_fn=lambda _name: speaker) == 0
+
+    with contextlib.closing(open_catalogue(catalogue_path)) as conn:
+        assert conn.execute("SELECT last_queued FROM songs WHERE video_id = 'V0'").fetchone()["last_queued"] is not None
+        assert conn.execute("SELECT last_queued FROM songs WHERE video_id = 'V1'").fetchone()["last_queued"] is None
+
+
+def test_queue_accepts_the_notify_flag() -> None:
+    """The queue LaunchAgent passes `--notify`. A parser that rejects it leaves the agent dead."""
+    parser = build_parser()
+
+    args = parser.parse_args(["queue", "--commit", "--notify"])
+
+    assert typing.cast("bool", args.notify) is True
+    assert typing.cast("bool", args.commit) is True

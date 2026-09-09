@@ -373,8 +373,8 @@ def _queue(args: argparse.Namespace, *, speaker_fn: Callable[[str], object] = fi
 
     Writes nothing without `--commit`. A dry run prints the sample and leaves the speaker alone.
 
-    `last_queued` moves only after the send succeeds. A song marked before a failed send stays out
-    of the next queue and never plays.
+    `last_queued` moves for the songs the speaker took, and for no other. A song marked without a
+    send stays out of the next queue and never plays.
     """
     commit = bool(getattr(args, "commit", False))
     settings = load_settings()
@@ -392,8 +392,8 @@ def _queue(args: argparse.Namespace, *, speaker_fn: Callable[[str], object] = fi
 
         speaker = speaker_fn(settings.speaker_name)
         sent = send_queue(typing.cast("QueueSpeaker", speaker), songs)
-        mark_queued(conn, [song.video_id for song in songs])
-    _logger.info("the speaker %s now holds %d tracks", settings.speaker_name, sent)
+        mark_queued(conn, [song.video_id for song in sent])
+    _logger.info("the speaker %s now holds %d of the %d songs chosen", settings.speaker_name, len(sent), len(songs))
     return 0
 
 
@@ -532,11 +532,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     refresh_parser = subparsers.add_parser("refresh", help="merge the YouTube Music library into the catalogue")
-    _ = refresh_parser.add_argument(
-        "--notify",
-        action="store_true",
-        help="show a macOS notification banner after a failure. The LaunchAgent passes this flag",
-    )
+    for agent_parser in (refresh_parser, queue_parser):
+        _ = agent_parser.add_argument(
+            "--notify",
+            action="store_true",
+            help="show a macOS notification banner after a failure. The LaunchAgent passes this flag",
+        )
     for headers_parser in (auth_parser, playlists_parser, refresh_parser):
         _ = headers_parser.add_argument(
             "--headers",

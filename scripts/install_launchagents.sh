@@ -18,7 +18,7 @@
 set -euo pipefail
 
 # Each name here needs an entry in `_AGENT_NAMES` in render_plists.py and a template file.
-AGENTS=(refresh)
+AGENTS=(refresh queue)
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LAUNCHAGENTS_DIR="${HOME}/Library/LaunchAgents"
 UID_NUM="$(id -u)"

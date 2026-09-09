@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.robgant.library-radio.queue</string>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_DIR__</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>__REPO_DIR__/.venv/bin/library-radio</string>
+      <string>queue</string>
+      <string>--commit</string>
+      <string>--notify</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <array>
+      <dict>
+        <key>Day</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>__HOUR__</integer>
+        <key>Minute</key>
+        <integer>__MINUTE__</integer>
+      </dict>
+      <dict>
+        <key>Day</key>
+        <integer>15</integer>
+        <key>Hour</key>
+        <integer>__HOUR__</integer>
+        <key>Minute</key>
+        <integer>__MINUTE__</integer>
+      </dict>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/queue.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/queue.stderr.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PATH</key>
+      <string>__REPO_DIR__/.venv/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+      <key>YTM_RADIO_DATABASE_PATH</key>
+      <string>__DATABASE_PATH__</string>
+      <key>YTM_RADIO_SPEAKER_NAME</key>
+      <string>__SPEAKER_NAME__</string>
+      <key>YTM_RADIO_TRUST_RATIO</key>
+      <string>__TRUST_RATIO__</string>
+      <key>YTM_RADIO_MISSING_THRESHOLD</key>
+      <string>__MISSING_THRESHOLD__</string>
+      <key>YTM_RADIO_QUEUE_SIZE</key>
+      <string>__QUEUE_SIZE__</string>
+      <key>YTM_RADIO_QUEUE_WINDOW_DAYS</key>
+      <string>__QUEUE_WINDOW_DAYS__</string>
+      <key>YTM_RADIO_HARVEST_TOLERANCE</key>
+      <string>__HARVEST_TOLERANCE__</string>
+    </dict>
+  </dict>
+</plist>

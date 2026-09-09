@@ -90,10 +90,10 @@ uninstall-agents:
 agents-status:
     launchctl list | grep library-radio || echo "no library-radio agent is loaded"
 
-# Run the refresh agent now, and do not wait for its hour
+# Run one agent now, and do not wait for its hour. Pass `refresh` or `queue`
 [group('deploy')]
-agents-kick:
-    launchctl kickstart -k "gui/$(id -u)/com.robgant.library-radio.refresh"
+agents-kick agent="refresh":
+    launchctl kickstart -k "gui/$(id -u)/com.robgant.library-radio.{{ agent }}"
 
 # Show one test banner, so macOS asks for notification permission
 [group('deploy')]

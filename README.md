@@ -246,6 +246,20 @@ speaker plays a track with no metadata, and it shows the raw URI instead.
 It refuses to send when too few songs qualify. A short queue hides how much of
 your library the speaker cannot reach. The fix is another harvest, or `rematch`.
 
+The speaker refuses a track now and then with UPnP error 800. It takes the same
+track on a later attempt, so the refusal is transient. The speaker refuses about
+7 adds in 100. The command offers each track three times, and it waits one
+second between two attempts. It logs every refusal with the song and its URI at
+WARNING.
+
+A song the speaker refuses three times is skipped, and the send continues. The
+command records the time against the songs the speaker took alone, so a skipped
+song stays eligible for the next queue.
+
+Each add costs the speaker about 0.6 seconds, so a queue of 500 takes about five
+minutes. `add_multiple_to_queue` is no faster, and one refusal loses the whole
+batch, so this sends one track at a time.
+
 ## Removed songs
 
 `refresh` removes a song the library lost. It is careful about it, because a
@@ -404,14 +418,15 @@ Every setting reads an environment variable with the `YTM_RADIO_` prefix.
 | `YTM_RADIO_QUEUE_WINDOW_DAYS` | `7`                                                            | How long a queued song stays out of the next.              |
 | `YTM_RADIO_REFRESH_HOUR`      | `4`                                                            | The hour the LaunchAgent runs `refresh`.                   |
 | `YTM_RADIO_REFRESH_MINUTE`    | `0`                                                            | The minute the LaunchAgent runs `refresh`.                 |
+| `YTM_RADIO_QUEUE_HOUR`        | `5`                                                            | The hour the LaunchAgent runs `queue --commit`.            |
+| `YTM_RADIO_QUEUE_MINUTE`      | `0`                                                            | The minute the LaunchAgent runs `queue --commit`.          |
 | `YTM_RADIO_HARVEST_TOLERANCE` | `25`                                                           | How far the queue length can sit from the playlist length. |
 
 `YTM_RADIO_QUEUE_WINDOW_DAYS` sets the window `catalogue.queueable_songs`
 excludes. A value of zero excludes nothing.
 
-`YTM_RADIO_REFRESH_HOUR` and `YTM_RADIO_REFRESH_MINUTE` reach launchd alone. No
-command reads a clock. See
-[Deploying to the Mac mini](#deploying-to-the-mac-mini).
+The four hour and minute values reach launchd alone. No command reads a clock.
+See [Deploying to the Mac mini](#deploying-to-the-mac-mini).
 
 ## The Everything N playlists
 
@@ -575,25 +590,38 @@ Answer that dialog. If discovery still fails, run the commands above again.
 `refresh` never reads the speaker, so the schedule survives a lapse. `queue`,
 `harvest`, `stop`, and `status` all stop.
 
-### What the agent runs
+### What the agents run
 
 `just install-agents` fills the templates under `scripts/plists/` from the
-current settings and writes the result to `~/Library/LaunchAgents`. The label is
-`com.robgant.library-radio.refresh`. It runs `.venv/bin/library-radio refresh`
-at `YTM_RADIO_REFRESH_HOUR:REFRESH_MINUTE` each day.
+current settings and writes the result to `~/Library/LaunchAgents`. Two agents
+carry the schedule.
 
-launchd gives the agent no shell. The render writes every value in
-[Settings](#settings) into the plist, so the agent and a terminal run act on the
+| Label                               | Command                    | Fires                                             |
+| ----------------------------------- | -------------------------- | ------------------------------------------------- |
+| `com.robgant.library-radio.refresh` | `refresh --headers <path>` | Each day at `YTM_RADIO_REFRESH_HOUR:MINUTE`       |
+| `com.robgant.library-radio.queue`   | `queue --commit`           | Day 1 and day 15 at `YTM_RADIO_QUEUE_HOUR:MINUTE` |
+
+launchd offers a day of the month and no fortnight, so the queue agent names day
+1 and day 15. That is 24 runs a year. `StartInterval` drifts across a sleep and
+a restart, so this uses a calendar instead.
+
+The queue agent reads no transport state. It clears the Sonos queue and refills
+it, so it stops a song the speaker plays. Its hour sits in the early morning for
+that reason.
+
+launchd gives an agent no shell. The render writes every value in
+[Settings](#settings) into each plist, so an agent and a terminal run act on the
 same values. After you change a setting, run `just install-agents` again.
 
-The plist names an absolute path for `--headers`, so it describes every file the
-agent reads. After you move the repository, run `just install-agents` again.
+The refresh plist names an absolute path for `--headers`, so it describes every
+file that agent reads. After you move the repository, run `just install-agents`
+again.
 
-The plist passes `--notify` as well. After a failure the command shows a macOS
-banner titled `library-radio refresh failed`, with the fault as its body. A
-terminal run omits the flag, because it prints the fault already.
+Each plist passes `--notify`. After a failure the command shows a macOS banner
+titled `library-radio <command> failed`, with the fault as its body. A terminal
+run omits the flag, because it prints the fault already.
 
-The agent writes its output to `refresh.stdout.log` and `refresh.stderr.log`, in
+Each agent writes its output to `<name>.stdout.log` and `<name>.stderr.log`, in
 the `logs` directory beside the catalogue.
 
 ### Operations
@@ -605,8 +633,9 @@ the `logs` directory beside the catalogue.
 | Deploy a new commit      | `just deploy-update`                           |
 | Report the loaded agents | `just agents-status`                           |
 | Run `refresh` now        | `just agents-kick`                             |
+| Send a queue now         | `just agents-kick queue`                       |
 | Test the failure banner  | `just agents-notify-test`                      |
-| Read the log             | `tail -f <catalogue>/logs/refresh.stderr.log`  |
+| Read a log               | `tail -f <catalogue>/logs/refresh.stderr.log`  |
 | Stop every agent         | `bash scripts/install_launchagents.sh --stop`  |
 | Start every agent        | `bash scripts/install_launchagents.sh --start` |
 | Remove every agent       | `just uninstall-agents`                        |
@@ -617,8 +646,9 @@ catalogue must stop every agent first, and not write underneath a run.
 
 ### What the schedule does not cover
 
-`queue --commit` is not an agent. It clears the Sonos queue first, so a
-scheduled run stops a song the speaker plays. Send a queue by hand.
+`harvest` and `rematch` are not agents. A harvest needs you to fill the Sonos
+queue from one playlist first, so no schedule can start it. The pairings they
+write are what `queue` draws from.
 
 The failure banner needs a person at the mini. Nothing sends mail, and nothing
 raises an alarm on another machine. Browser cookies expire after some months,
