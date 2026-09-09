@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "youtube-music-library-radio"
-version = "0.1.0"
+version = "1.0.0"
 description = "Stream the owner's YouTube Music library to a Sonos speaker as an endless radio station."
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
