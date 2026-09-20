@@ -1,4 +1,4 @@
-"""Tests for youtube_music_library_radio.playlists.
+"""Tests for youtube_music_playlist.playlists.
 
 No test reaches the network. `_FakeClient` stands in for `ytmusicapi.YTMusic`, and it records every
 call, so a test can assert that a dry run wrote nothing.
@@ -12,8 +12,8 @@ import typing
 import pytest
 from ytmusicapi.exceptions import YTMusicServerError
 
-from youtube_music_library_radio.catalogue import PlaylistMembership, Song
-from youtube_music_library_radio.playlists import (
+from youtube_music_playlist.catalogue import PlaylistMembership, Song
+from youtube_music_playlist.playlists import (
     ADD_BATCH,
     Confirmation,
     IncompleteReadError,
@@ -26,10 +26,10 @@ from youtube_music_library_radio.playlists import (
     require_complete,
     uncovered,
 )
-from youtube_music_library_radio.refresh import ExcludedSong, LibraryScan
+from youtube_music_playlist.refresh import ExcludedSong, LibraryScan
 
 if typing.TYPE_CHECKING:
-    from youtube_music_library_radio.jsonshape import JSON
+    from youtube_music_playlist.jsonshape import JSON
 
 
 def _song(video_id: str, title: str = "A Title") -> Song:
@@ -219,7 +219,7 @@ def test_plan_writes_never_names_a_song_a_playlist_already_holds() -> None:
 
 
 def test_plan_writes_returns_nothing_when_every_song_is_covered() -> None:
-    """A second run must plan no write. That is how the owner knows the first run finished."""
+    """A second run must plan no write. That is how I know the first run finished."""
     assert not plan_writes([_membership(1, ["a"])], [_song("a")], size=500)
 
 

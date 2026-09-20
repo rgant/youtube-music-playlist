@@ -5,7 +5,7 @@ import typing
 
 import pytest
 
-from youtube_music_library_radio.catalogue import open_catalogue
+from youtube_music_playlist.catalogue import open_catalogue
 
 if typing.TYPE_CHECKING:
     import sqlite3
@@ -41,4 +41,4 @@ def _block_real_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
         message = "a unit test reached the real soco.discover; pass discover_fn instead"
         raise AssertionError(message)
 
-    monkeypatch.setattr("youtube_music_library_radio.control.discover", _blocked)
+    monkeypatch.setattr("youtube_music_playlist.control.discover", _blocked)

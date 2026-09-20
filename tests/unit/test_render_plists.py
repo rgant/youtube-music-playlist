@@ -1,11 +1,11 @@
-"""Tests for youtube_music_library_radio.render_plists."""
+"""Tests for youtube_music_playlist.render_plists."""
 
 import typing
 
 import pytest
 
-from youtube_music_library_radio import render_plists
-from youtube_music_library_radio.settings import Settings
+from youtube_music_playlist import render_plists
+from youtube_music_playlist.settings import Settings
 
 if typing.TYPE_CHECKING:
     from pathlib import Path
@@ -80,7 +80,7 @@ def test_substitutions_carry_the_queue_hour_and_minute(tmp_path: Path) -> None:
 
 
 def test_the_queue_agent_has_a_template_and_a_name(tmp_path: Path) -> None:
-    """The owner asked for a queue that fills itself, so `queue` must reach launchd like `refresh`."""
+    """I asked for a queue that fills itself, so `queue` must reach launchd like `refresh`."""
     written = render_plists.render(output_dir=tmp_path / "agents", settings=_settings(tmp_path))
 
     assert "queue" in render_plists._AGENT_NAMES
@@ -97,7 +97,7 @@ def test_the_rendered_queue_plist_sends_the_queue_and_asks_for_a_banner(tmp_path
 
 
 def test_the_rendered_queue_plist_runs_on_two_days_each_month(tmp_path: Path) -> None:
-    """The owner asked for every two weeks. launchd offers a day of the month, and no fortnight."""
+    """I asked for every two weeks. launchd offers a day of the month, and no fortnight."""
     written = render_plists.render(output_dir=tmp_path / "agents", settings=_settings(tmp_path))
     content = next(path for path in written if path.name.endswith("queue.plist")).read_text(encoding="utf-8")
 

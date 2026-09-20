@@ -1,6 +1,6 @@
 """Pair a library song with a Sonos track the catalogue already observed.
 
-`harvest` learns a pairing from one queue read, and it needs the owner to put one playlist in the
+`harvest` learns a pairing from one queue read, and it needs me to put one playlist in the
 Sonos queue by hand. Every entry it reads lands in `sonos_tracks`, matched or not. That table
 therefore holds evidence about songs that no harvest reaches yet.
 
@@ -19,8 +19,8 @@ import dataclasses
 import logging
 import typing
 
-from youtube_music_library_radio.catalogue import free_sonos_tracks, pair_sonos_track, unpaired_songs
-from youtube_music_library_radio.harvest import comparison_key, primary_artist
+from youtube_music_playlist.catalogue import free_sonos_tracks, pair_sonos_track, unpaired_songs
+from youtube_music_playlist.harvest import comparison_key, primary_artist
 
 if typing.TYPE_CHECKING:
     import sqlite3
@@ -36,8 +36,8 @@ type Pairing = tuple[str, str, str]
 class RematchPlan:
     """What one rematch run can write.
 
-    `ambiguous` counts the keys that name a song and a track but not exactly one of each. The owner
-    reads it as the work this rule cannot do, and a harvest of that playlist is what does it.
+    `ambiguous` counts the keys that name a song and a track but not exactly one of each. I read
+    it as the work this rule cannot do, and a harvest of that playlist is what does it.
     """
 
     pairs: tuple[Pairing, ...]

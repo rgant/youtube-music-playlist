@@ -3,34 +3,34 @@ build-backend = "hatchling.build"
 requires = [ "hatchling" ]
 
 [project]
-name = "youtube-music-library-radio"
+name = "youtube-music-playlist"
 version = "1.0.0"
-description = "Stream the owner's YouTube Music library to a Sonos speaker as an endless radio station."
+description = "Keep a catalogue of my YouTube Music library, and queue it on a Sonos speaker."
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
 authors = [ { name = "J Rob Gant", email = "rgant@alum.wpi.edu" } ]
 requires-python = ">=3.14"
 dependencies = [
   "soco>=0.31.2",
-  "ytmusicapi>=1.12.2",
+  "ytmusicapi>=1.12.3",
 ]
 [project.scripts]
-library-radio = "youtube_music_library_radio.__main__:main"
+library-radio = "youtube_music_playlist.__main__:main"
 
 [dependency-groups]
 dev = [
-  "basedpyright>=1.40.0",
+  "basedpyright>=1.40.1",
   "deptry>=0.25.1",
   "mypy>=2.3.1",
   "pylint>=4.0.8",
   "pylint-per-file-ignores>=3.2.1",
   "pylint-pytest>=2.0.0a1",
   "pylint-venv>=3.0.4",
-  "pyproject-fmt>=2.29.3",
+  "pyproject-fmt>=2.29.4",
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
   "pytest-randomly>=5.0.0",
-  "ruff>=0.16.6",
+  "ruff>=0.16.8",
 ]
 
 [tool.uv]
@@ -373,7 +373,7 @@ recursive = true
 ignore = [ ".venv" ]
 
 [tool.deptry]
-known_first_party = [ "youtube_music_library_radio" ]
+known_first_party = [ "youtube_music_playlist" ]
 
 [tool.pyproject-fmt]
 keep_full_version = true

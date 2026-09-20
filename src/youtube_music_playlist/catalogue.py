@@ -193,7 +193,7 @@ def record_playlists(conn: sqlite3.Connection, playlists: Iterable[PlaylistMembe
     matter. A replace shrinks the stored membership to the worst read. A short membership then looks
     like "these songs are in no playlist", which is the fault that writes duplicates.
 
-    The union over-states membership when the owner deletes a song from a playlist by hand. That
+    The union over-states membership when I delete a song from a playlist by hand. That
     song then waits, and no run puts it back. Over-statement costs a wait. Under-statement costs a
     duplicate, so the store leans this way on purpose.
 
@@ -415,7 +415,7 @@ def mark_absent(conn: sqlite3.Connection, *, present: Iterable[str], threshold: 
     Call this only after a trusted read. A short read returns fewer songs than the library holds, and
     every song it missed looks removed. The trust rule in `refresh` decides which reads reach here.
 
-    A removal therefore needs `threshold` trusted reads in a row to agree. A song the owner deletes
+    A removal therefore needs `threshold` trusted reads in a row to agree. A song I delete
     on purpose leaves after that many refreshes. A transient fault costs a wait and nothing else.
 
     The temporary table carries the present IDs. A `WHERE video_id NOT IN (...)` form needs one host

@@ -2,7 +2,7 @@
 
 A scheduled run writes its fault into a log nobody reads. `queue` keeps working from the songs that
 already carry a pairing, so a dead credential stays invisible for months. The banner is the one
-sign the owner gets.
+sign I get.
 
 macOS asks for notification permission the first time `osascript` shows a banner. An unanswered
 prompt swallows the banner, so fire one from a terminal after each install.

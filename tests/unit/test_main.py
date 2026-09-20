@@ -1,4 +1,4 @@
-"""Tests for youtube_music_library_radio.__main__.
+"""Tests for youtube_music_playlist.__main__.
 
 No test reaches the speaker or the network. Every subcommand handler takes the work that leaves this
 machine as a keyword-only callable, and most tests pass a fake for it. Each fake can raise as well
@@ -27,9 +27,9 @@ import pytest
 from soco.exceptions import SoCoUPnPException
 from ytmusicapi.exceptions import YTMusicServerError
 
-from testdoubles import FakeLibraryClient
-from youtube_music_library_radio import queue as queue_module
-from youtube_music_library_radio.__main__ import (
+from testdoubles import FakeLibraryClient, QueuePage
+from youtube_music_playlist import queue as queue_module
+from youtube_music_playlist.__main__ import (
     _AUTH_PROBE_LIMIT,
     _HANDLERS,
     _auth,
@@ -46,8 +46,8 @@ from youtube_music_library_radio.__main__ import (
     build_parser,
     main,
 )
-from youtube_music_library_radio.authheaders import MissingHeadersError
-from youtube_music_library_radio.catalogue import (
+from youtube_music_playlist.authheaders import MissingHeadersError
+from youtube_music_playlist.catalogue import (
     PlaylistMembership,
     QueueEntry,
     Song,
@@ -60,9 +60,9 @@ from youtube_music_library_radio.catalogue import (
     record_sonos_track,
     stored_playlists,
 )
-from youtube_music_library_radio.harvest import HarvestError
-from youtube_music_library_radio.playlists import IncompleteReadError, PlannedWrite
-from youtube_music_library_radio.refresh import ExcludedSong, LibraryScan, RefreshResult, refresh
+from youtube_music_playlist.harvest import HarvestError
+from youtube_music_playlist.playlists import IncompleteReadError, PlannedWrite
+from youtube_music_playlist.refresh import ExcludedSong, LibraryScan, RefreshResult, refresh
 
 if typing.TYPE_CHECKING:
     import sqlite3
@@ -70,8 +70,8 @@ if typing.TYPE_CHECKING:
 
     from soco.data_structures import DidlMusicTrack
 
-    from youtube_music_library_radio.jsonshape import JSON
-    from youtube_music_library_radio.settings import Settings
+    from youtube_music_playlist.jsonshape import JSON
+    from youtube_music_playlist.settings import Settings
 
 _SUBCOMMANDS = ["bootstrap", "auth", "playlists", "harvest", "rematch", "queue", "refresh", "stop", "status"]
 
@@ -260,27 +260,28 @@ def test_status_reports_the_row_count(catalogue_path: Path, caplog: pytest.LogCa
     """`status` reports the catalogue row count and the transport state, and returns zero."""
     _seed(catalogue_path, 3)
 
-    def _playing(_settings: Settings) -> str:
-        return "PLAYING"
+    def _playing(_settings: Settings) -> tuple[str, int]:
+        return "PLAYING", 412
 
     with caplog.at_level(logging.INFO):
-        code = _status(_args("status"), state_fn=_playing)
+        code = _status(_args("status"), report_fn=_playing)
 
     assert code == 0
     assert "holds 3 songs" in caplog.text
     assert "PLAYING" in caplog.text
+    assert "412" in caplog.text
 
 
 def test_status_reports_the_row_count_when_the_speaker_is_missing(catalogue_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """`status` still reports the row count when discovery fails, and returns a non-zero code."""
     _seed(catalogue_path, 2)
 
-    def _no_speaker(_settings: Settings) -> str:
+    def _no_speaker(_settings: Settings) -> tuple[str, int]:
         message = "no speaker named 'Kitchen' found; discovery found: none"
         raise RuntimeError(message)
 
     with caplog.at_level(logging.INFO):
-        code = _status(_args("status"), state_fn=_no_speaker)
+        code = _status(_args("status"), report_fn=_no_speaker)
 
     assert code != 0
     assert "holds 2 songs" in caplog.text
@@ -469,7 +470,7 @@ def test_a_plain_type_error_is_not_reported_as_operator_error() -> None:
 
     `_EXPECTED_FAILURES` names `CredentialError`, which subclasses `TypeError`. It never names the
     builtin. A handler that calls a function with the wrong arguments must reach the developer as a
-    traceback, and never the owner as an operator error.
+    traceback, and never me as an operator error.
     """
 
     def _a_bug(args: argparse.Namespace) -> int:
@@ -617,7 +618,7 @@ def _scan(*video_ids: str) -> LibraryScan:
 
 @pytest.mark.usefixtures("catalogue_path")
 def test_playlists_writes_nothing_without_commit(caplog: pytest.LogCaptureFixture) -> None:
-    """A dry run is the default, because a write reaches the owner's Google account."""
+    """A dry run is the default, because a write reaches my Google account."""
     client = _FakePlaylistClient({"Everything 1": ["held"]})
 
     with caplog.at_level(logging.INFO):
@@ -808,7 +809,7 @@ def test_a_ytmusicapi_server_error_returns_non_zero(caplog: pytest.LogCaptureFix
     """YouTube answers a bad request with an error `ytmusicapi` raises. A person cannot act on a traceback.
 
     `YTMusicError` subclasses `Exception`, not `OSError`, so it escapes the network-fault catch. It
-    reaches the owner on a real run, so `main` must report it as one line and a non-zero code.
+    reaches me on a real run, so `main` must report it as one line and a non-zero code.
     """
 
     def _server_error(_args: argparse.Namespace) -> int:
@@ -935,7 +936,7 @@ class _BannerRecorder:
 
 
 def test_notify_sends_a_banner_when_a_handler_raises() -> None:
-    """`--notify` is the one sign the owner gets of a scheduled run that failed.
+    """`--notify` is the one sign I get of a scheduled run that failed.
 
     The LaunchAgent writes its fault into a log nobody reads, and `queue` keeps working from the
     songs that already carry a pairing.
@@ -963,7 +964,7 @@ def test_notify_sends_a_banner_for_a_non_zero_return() -> None:
 
 
 def test_no_banner_reaches_a_run_that_did_not_ask_for_one() -> None:
-    """A terminal run shows the fault already, so a banner there is noise the owner did not ask for."""
+    """A terminal run shows the fault already, so a banner there is noise I did not ask for."""
     banner = _BannerRecorder()
 
     code = main(["refresh"], handlers={"refresh": lambda _args: 3}, notify_fn=banner)
@@ -973,7 +974,7 @@ def test_no_banner_reaches_a_run_that_did_not_ask_for_one() -> None:
 
 
 def test_no_banner_reaches_a_run_that_succeeded() -> None:
-    """A daily refresh that works must stay silent. A banner every morning teaches the owner to ignore it."""
+    """A daily refresh that works must stay silent. A banner every morning teaches me to ignore it."""
     banner = _BannerRecorder()
 
     code = main(["refresh", "--notify"], handlers={"refresh": lambda _args: 0}, notify_fn=banner)
@@ -985,7 +986,7 @@ def test_no_banner_reaches_a_run_that_succeeded() -> None:
 def test_harvest_reads_the_tolerance_from_the_settings(catalogue_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The gap between the queue and the playlist is what stops a harvest against the wrong pool.
 
-    An owner with a legitimate gap must change a variable, and not the code.
+    If a gap is legitimate, I must change a variable, and not the code.
     """
     monkeypatch.setenv("YTM_RADIO_HARVEST_TOLERANCE", "0")
     with contextlib.closing(open_catalogue(catalogue_path)) as conn:
@@ -1006,15 +1007,22 @@ def test_harvest_reads_the_tolerance_from_the_settings(catalogue_path: Path, mon
         _ = _harvest(argparse.Namespace(playlist="Everything 1"), speaker_fn=lambda _name: _EmptyQueue())
 
 
-class _RefusingSpeaker:
-    """A speaker that refuses one named URI, as a real one refuses a track its service dropped."""
+class _QueueSpeaker:
+    """A speaker for the `queue` path.
 
-    def __init__(self, refuse: str) -> None:
+    `refuse` names one URI it rejects, as a real one rejects a track its service dropped. `queued`
+    is the depth `get_queue` reports, which is the value `--if-empty` acts on.
+    """
+
+    def __init__(self, refuse: str = "", queued: int = 0) -> None:
         self.added: list[str] = []
+        self.clears: int = 0
         self._refuse: str = refuse
+        self._queued: int = queued
 
     def clear_queue(self) -> None:
-        """Accept the clear."""
+        """Record the clear."""
+        self.clears += 1
 
     def add_to_queue(self, queueable_item: DidlMusicTrack) -> int:
         """Record the addition, or refuse the one dead URI."""
@@ -1024,23 +1032,106 @@ class _RefusingSpeaker:
         self.added.append(uri)
         return len(self.added)
 
+    def get_queue(self, start: int = 0, max_items: int = 100) -> QueuePage:
+        """Report `queued` as the depth of the whole queue, whatever page the caller asks for."""
+        del start, max_items
+        return QueuePage(total_matches=self._queued)
+
+
+def _seed_paired(path: Path, count: int) -> None:
+    """Put `count` songs in the catalogue at `path`, and pair each one with a Sonos track."""
+    with contextlib.closing(open_catalogue(path)) as conn:
+        _ = merge_songs(conn, [Song(video_id=f"V{index}", title=f"Song {index}", artist="A Band") for index in range(count)])
+        for index in range(count):
+            _ = pair_sonos_track(conn, f"V{index}", track_id=f"S{index}", uri=f"x-sonosapi-hls-static:S{index}?sid=284&flags=0&sn=7")
+
+
+def _cooled_down(path: Path) -> int:
+    """Return how many songs in the catalogue at `path` carry a `last_queued` time."""
+    with contextlib.closing(open_catalogue(path)) as conn:
+        return typing.cast("int", conn.execute("SELECT COUNT(*) AS total FROM songs WHERE last_queued IS NOT NULL").fetchone()["total"])
+
 
 def test_queue_leaves_a_refused_song_eligible(catalogue_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A refused song never played. A cooldown it did not earn keeps it out for a week."""
     monkeypatch.setenv("YTM_RADIO_QUEUE_SIZE", "2")
     # The retry pause is real time. The refusal path here needs the retry, and not the wait.
     monkeypatch.setattr(queue_module, "_ADD_RETRY_SECONDS", 0.0)
-    with contextlib.closing(open_catalogue(catalogue_path)) as conn:
-        _ = merge_songs(conn, [Song(video_id=f"V{index}", title=f"Song {index}", artist="A Band") for index in range(2)])
-        for index in range(2):
-            _ = pair_sonos_track(conn, f"V{index}", track_id=f"S{index}", uri=f"x-sonosapi-hls-static:S{index}?sid=284&flags=0&sn=7")
+    _seed_paired(catalogue_path, 2)
 
-    speaker = _RefusingSpeaker("x-sonosapi-hls-static:S1?sid=284&flags=0&sn=7")
+    speaker = _QueueSpeaker(refuse="x-sonosapi-hls-static:S1?sid=284&flags=0&sn=7")
     assert _queue(argparse.Namespace(commit=True), speaker_fn=lambda _name: speaker) == 0
 
     with contextlib.closing(open_catalogue(catalogue_path)) as conn:
         assert conn.execute("SELECT last_queued FROM songs WHERE video_id = 'V0'").fetchone()["last_queued"] is not None
         assert conn.execute("SELECT last_queued FROM songs WHERE video_id = 'V1'").fetchone()["last_queued"] is None
+
+
+def test_queue_if_empty_sends_nothing_when_the_speaker_holds_tracks(
+    catalogue_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """I can run this guard at any moment, so it must leave a live queue alone.
+
+    A clear drops every track the speaker did not play. It also moves `last_queued` on 500 songs.
+    """
+    monkeypatch.setenv("YTM_RADIO_QUEUE_SIZE", "2")
+    _seed_paired(catalogue_path, 2)
+    speaker = _QueueSpeaker(queued=137)
+
+    with caplog.at_level(logging.INFO):
+        code = _queue(argparse.Namespace(commit=True, if_empty=True), speaker_fn=lambda _name: speaker)
+
+    assert code == 0
+    assert speaker.clears == 0
+    assert not speaker.added
+    assert "137" in caplog.text
+    assert _cooled_down(catalogue_path) == 0
+
+
+def test_queue_if_empty_fills_an_empty_queue(catalogue_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A power cut empties the Sonos queue. This run answers it, and the speaker stays silent without the send."""
+    monkeypatch.setenv("YTM_RADIO_QUEUE_SIZE", "2")
+    _seed_paired(catalogue_path, 2)
+    speaker = _QueueSpeaker(queued=0)
+
+    assert _queue(argparse.Namespace(commit=True, if_empty=True), speaker_fn=lambda _name: speaker) == 0
+
+    assert len(speaker.added) == 2
+    assert _cooled_down(catalogue_path) == 2
+
+
+def test_queue_if_empty_sends_nothing_without_commit(catalogue_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A dry run prints the sample and changes nothing, and `--if-empty` must not overrule that."""
+    monkeypatch.setenv("YTM_RADIO_QUEUE_SIZE", "2")
+    _seed_paired(catalogue_path, 2)
+    speaker = _QueueSpeaker(queued=0)
+
+    assert _queue(argparse.Namespace(commit=False, if_empty=True), speaker_fn=lambda _name: speaker) == 0
+
+    assert speaker.clears == 0
+    assert not speaker.added
+    assert _cooled_down(catalogue_path) == 0
+
+
+def test_a_plain_dry_run_reaches_no_speaker(catalogue_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without `--if-empty` a dry run needs no speaker, so it still prints the sample when discovery fails."""
+    monkeypatch.setenv("YTM_RADIO_QUEUE_SIZE", "1")
+    _seed_paired(catalogue_path, 1)
+
+    def _no_speaker(_name: str) -> object:
+        message = "no speaker named 'Kitchen' found. Discovery found: none"
+        raise RuntimeError(message)
+
+    assert _queue(argparse.Namespace(commit=False, if_empty=False), speaker_fn=_no_speaker) == 0
+
+
+def test_queue_accepts_the_if_empty_flag() -> None:
+    """I run this after a power cut. A parser that rejects the flag stops that run."""
+    parser = build_parser()
+
+    args = parser.parse_args(["queue", "--commit", "--if-empty"])
+
+    assert typing.cast("bool", args.if_empty) is True
 
 
 def test_queue_accepts_the_notify_flag() -> None:

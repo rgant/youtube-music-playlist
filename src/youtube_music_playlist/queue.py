@@ -4,8 +4,8 @@ Every song the queue can hold carries a `sonos_uri`, which a harvest wrote. This
 to YouTube. It reads the catalogue and it commands the speaker, so a queue costs no Google request
 at all.
 
-`last_queued` is what keeps a song out of the next queue. The window is a setting, so the owner
-trades variety against repetition without a code change.
+`last_queued` is what keeps a song out of the next queue. The window is a setting, so I trade
+variety against repetition without a code change.
 """
 
 import logging
@@ -16,14 +16,14 @@ import urllib.parse
 from soco.data_structures import DidlMusicTrack, DidlResource
 from soco.exceptions import SoCoUPnPException
 
-from youtube_music_library_radio.catalogue import queueable_songs
+from youtube_music_playlist.catalogue import queueable_songs
 
 if typing.TYPE_CHECKING:
     import random
     import sqlite3
     from collections.abc import Callable, Sequence
 
-    from youtube_music_library_radio.catalogue import Song
+    from youtube_music_playlist.catalogue import Song
 
 _logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ _ADD_RETRY_SECONDS = 1.0
 
 
 class NotEnoughSongsError(RuntimeError):
-    """Too few songs carry a Sonos pairing to fill the queue the owner asked for.
+    """Too few songs carry a Sonos pairing to fill the queue I asked for.
 
     A short queue hides how much of the library the speaker cannot reach. The message names the
     fixes.

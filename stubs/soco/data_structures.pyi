@@ -1,7 +1,11 @@
 """Local type stubs for `soco.data_structures`, which ships no type information of its own.
 
 `queue.py` builds the item it adds to the Sonos queue, because `soco.SoCo.add_uri_to_queue` sends an
-item with an empty title. This stub covers only that surface: one resource and one music track.
+item with an empty title. This stub covers that surface, one resource and one music track, and the
+queue `soco.SoCo.get_queue` returns.
+
+`Queue` subclasses `list`, so `harvest.read_queue` iterates it. `total_matches` counts the whole
+queue and not the page, and `control.queue_depth` reads it off a one-item page.
 
 `DidlMusicTrack` takes `creator` and `album` through `**kwargs` in the real class, and it stores each
 one as an attribute of the same name. They are declared here, because a test reads them back.
@@ -30,3 +34,9 @@ class DidlMusicTrack:
         desc: str = ...,
         **kwargs: object,
     ) -> None: ...
+
+class Queue(list[object]):
+    @property
+    def total_matches(self) -> int: ...
+    @property
+    def number_returned(self) -> int: ...

@@ -1,11 +1,11 @@
-"""Tests for youtube_music_library_radio.settings."""
+"""Tests for youtube_music_playlist.settings."""
 
 import os
 from pathlib import Path
 
 import pytest
 
-from youtube_music_library_radio.settings import load_settings
+from youtube_music_playlist.settings import load_settings
 
 
 @pytest.fixture(autouse=True)
@@ -19,7 +19,7 @@ def _clear_ytm_radio_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_defaults_match_the_documented_values() -> None:
     """The README documents each of these default values.
 
-    A changed default contradicts the README, and nothing fails until the owner reaches the wrong
+    A changed default contradicts the README, and nothing fails until I reach the wrong
     speaker or hears an unexpected repeat.
     """
     settings = load_settings()
@@ -28,7 +28,7 @@ def test_defaults_match_the_documented_values() -> None:
 
 
 def test_environment_overrides_a_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`YTM_RADIO_SPEAKER_NAME` is the owner's one way to name a different room.
+    """`YTM_RADIO_SPEAKER_NAME` is my one way to name a different room.
 
     If the environment read breaks, `stop`, `status`, `harvest`, and `queue` all reach the Kitchen
     speaker.
@@ -60,11 +60,11 @@ def test_database_path_expands_the_home_directory() -> None:
     settings = load_settings()
 
     assert "~" not in str(settings.database_path)
-    assert settings.database_path == Path.home() / ".local/share/youtube-music-library-radio/catalogue.sqlite3"
+    assert settings.database_path == Path.home() / ".local/share/youtube-music-playlist/catalogue.sqlite3"
 
 
 def test_the_removal_settings_have_documented_defaults() -> None:
-    """A short library read must not remove songs. The owner acts on each default, so each is pinned."""
+    """A short library read must not remove songs. I act on each default, so each is pinned."""
     settings = load_settings()
 
     assert settings.trust_ratio == 0.9

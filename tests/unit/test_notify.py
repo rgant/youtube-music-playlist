@@ -1,9 +1,9 @@
-"""Tests for youtube_music_library_radio.notify."""
+"""Tests for youtube_music_playlist.notify."""
 
 import subprocess
 import typing
 
-from youtube_music_library_radio.notify import notify
+from youtube_music_playlist.notify import notify
 
 if typing.TYPE_CHECKING:
     from collections.abc import Sequence
@@ -72,7 +72,7 @@ def test_notify_reports_false_when_osascript_hangs() -> None:
 
 
 def test_notify_reports_false_after_a_non_zero_exit() -> None:
-    """The system refuses a banner until the owner grants permission, and it reports that refusal here."""
+    """The system refuses a banner until I grant permission, and it reports that refusal here."""
     runner = _FakeRunner(returncode=1, stderr=b"not authorized")
 
     assert notify("failed", "body", run_fn=runner) is False

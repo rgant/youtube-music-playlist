@@ -1,4 +1,4 @@
-"""Tests for youtube_music_library_radio.refresh.
+"""Tests for youtube_music_playlist.refresh.
 
 Every test passes a fake client object instead of a mock of `ytmusicapi`. That fake is a small
 class. Its `get_library_songs` method returns a payload recorded under tests/fixtures, or a payload
@@ -20,13 +20,13 @@ import pytest
 from ytmusicapi.exceptions import YTMusicUserError
 
 from testdoubles import FakeLibraryClient
-from youtube_music_library_radio.catalogue import Song, count_songs, merge_songs, songs_by_video_id
-from youtube_music_library_radio.refresh import _EXCLUDED_PATTERNS, ExcludedSong, _compile_matchers, library_songs, refresh
+from youtube_music_playlist.catalogue import Song, count_songs, merge_songs, songs_by_video_id
+from youtube_music_playlist.refresh import _EXCLUDED_PATTERNS, ExcludedSong, _compile_matchers, library_songs, refresh
 
 if typing.TYPE_CHECKING:
     import sqlite3
 
-    from youtube_music_library_radio.jsonshape import JSON
+    from youtube_music_playlist.jsonshape import JSON
 
 _FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
@@ -188,8 +188,8 @@ def test_every_pattern_deletes_a_seeded_row_whatever_the_case(conn: sqlite3.Conn
 def test_a_longer_word_that_holds_a_pattern_survives(conn: sqlite3.Connection, tmp_path: Path, title: str) -> None:
     """A pattern inside a longer word excludes nothing, so an uncensored cut stays in the catalogue.
 
-    `uncensored` holds `censored`, and an uncensored cut is the full song. That song is the one the
-    owner wants. A word boundary on each end of the pattern is what keeps it.
+    `uncensored` holds `censored`, and an uncensored cut is the full song. That song is the one I
+    want. A word boundary on each end of the pattern is what keeps it.
     """
     _ = merge_songs(conn, [_seeded_song("SEEDED_LONGER_WORD")])
     payload: list[dict[str, JSON]] = [
@@ -220,7 +220,7 @@ def test_a_pattern_with_a_non_alphanumeric_edge_stops_the_module(pattern: str) -
     every row it matches. Each other pattern matches no title at all. Neither fault reports itself
     without this check, so the module must refuse to load instead.
 
-    The message names the pattern, because the owner has to find it in `_EXCLUDED_PATTERNS`.
+    The message names the pattern, because I have to find it in `_EXCLUDED_PATTERNS`.
     """
     with pytest.raises(ValueError, match="must start and end with a letter or a digit") as caught:
         _ = _compile_matchers((pattern,))
@@ -244,7 +244,7 @@ def test_punctuation_inside_a_pattern_stays_a_literal() -> None:
 
     No pattern in `_EXCLUDED_PATTERNS` holds a regex metacharacter today, so no title-level
     test covers `re.escape`. This one does: without `re.escape` the matcher for `c.o` also matches
-    `cao`, and `refresh` then deletes songs the owner never named.
+    `cao`, and `refresh` then deletes songs I never named.
     """
     _pattern, matcher = _compile_matchers(("c.o",))[0]
 
@@ -257,7 +257,7 @@ def test_refresh_lists_every_excluded_song_with_its_artist_and_pattern(
 ) -> None:
     """`refresh` logs one line per excluded song, with the pattern, the video ID, the artist, and the title.
 
-    The owner reads this listing to confirm that a pattern matches the right songs. A line without
+    I read this listing to confirm that a pattern matches the right songs. A line without
     the artist and the title cannot tell a real song from a wrong match.
     """
     payload: list[dict[str, JSON]] = [
@@ -400,8 +400,8 @@ def test_an_empty_library_read_raises(tmp_path: Path) -> None:
 def test_the_empty_read_error_and_the_missing_file_error_name_different_faults(tmp_path: Path) -> None:
     """The two credential errors share a type and a fix, and each message names its own fault.
 
-    Both faults send the owner to the same command, so they share one error shape. A message that
-    reports "missing or rejected" for a file that was read and accepted sends the owner to the
+    Both faults send me to the same command, so they share one error shape. A message that
+    reports "missing or rejected" for a file that was read and accepted sends me to the
     wrong place. This test fails if either error reuses the message of the other.
     """
     present_path = _headers_file(tmp_path)

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 _PREFIX = "YTM_RADIO_"
-_DEFAULT_DATABASE_PATH = Path("~/.local/share/youtube-music-library-radio/catalogue.sqlite3").expanduser()
+_DEFAULT_DATABASE_PATH = Path("~/.local/share/youtube-music-playlist/catalogue.sqlite3").expanduser()
 
 
 # `Settings` holds one field per environment variable, so its field count follows the settings the
@@ -77,7 +77,7 @@ def _env_int(name: str, default: int) -> int:
     """Read an integer setting from the environment. An unset variable gives `default`.
 
     Raises `ValueError` naming the field and its environment variable for a value that is not a
-    whole number. The `int()` error names the bad text and not the variable, so the owner cannot tell which
+    whole number. The `int()` error names the bad text and not the variable, so I cannot tell which
     setting to correct.
     """
     value = os.environ.get(_PREFIX + name)
@@ -97,7 +97,7 @@ def _env_float(name: str, default: float) -> float:
     """Read a fractional setting from the environment. An unset variable gives `default`.
 
     Raises `ValueError` naming the field and its environment variable for a value that is not a
-    number. The `float()` error names the bad text and not the variable, so the owner cannot tell which
+    number. The `float()` error names the bad text and not the variable, so I cannot tell which
     setting to correct.
     """
     value = os.environ.get(_PREFIX + name)

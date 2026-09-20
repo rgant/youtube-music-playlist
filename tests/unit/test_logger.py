@@ -1,10 +1,10 @@
-"""Tests for youtube_music_library_radio.logger."""
+"""Tests for youtube_music_playlist.logger."""
 
 import io
 import logging
 import typing
 
-from youtube_music_library_radio.logger import RainbowLogFormatter, create_handler
+from youtube_music_playlist.logger import RainbowLogFormatter, create_handler
 
 if typing.TYPE_CHECKING:
     import pytest
@@ -32,7 +32,7 @@ def _make_record(level: int, message: str) -> logging.LogRecord:
 
 
 def test_create_handler_uses_the_color_formatter_on_a_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The owner runs each command at a terminal and reads the level name by its color.
+    """I run each command at a terminal and read the level name by its color.
 
     Without the formatter, an `ERROR` line looks the same as an `INFO` line.
     """
@@ -56,7 +56,7 @@ def test_create_handler_uses_no_formatter_off_a_terminal(monkeypatch: pytest.Mon
 
 
 def test_format_colors_the_level_name_and_keeps_the_message() -> None:
-    """The exact escape codes are the output the owner reads.
+    """The exact escape codes are the output I read.
 
     A wrong code paints the wrong level. If `format` returns before `super().format`, the line
     carries a level name and no message.

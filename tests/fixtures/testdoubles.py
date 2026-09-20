@@ -4,12 +4,13 @@ Two test modules that define the same fake hold two copies of one decision. The 
 pylint reports the block as duplicate code. Each item here therefore has one home.
 """
 
+import dataclasses
 import typing
 
-from youtube_music_library_radio.catalogue import QueueEntry
+from youtube_music_playlist.catalogue import QueueEntry
 
 if typing.TYPE_CHECKING:
-    from youtube_music_library_radio.jsonshape import JSON
+    from youtube_music_playlist.jsonshape import JSON
 
 
 class FakeLibraryClient:
@@ -42,3 +43,13 @@ def queue_entry(track_id: str, title: str, artist: str, album: str = "An Album",
         album=album,
         duration_seconds=seconds,
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class QueuePage:
+    """One page of a Sonos queue, as `soco.SoCo.get_queue` returns it.
+
+    `total_matches` counts the whole queue and not the page, so a one-item page carries the depth.
+    """
+
+    total_matches: int

@@ -33,7 +33,7 @@ render_plists() {
 	# render_plists creates the log directory as a side effect, so no mkdir is needed for it.
 	(
 		cd "${REPO_DIR}" \
-			&& uv run python -m youtube_music_library_radio.render_plists --output "${LAUNCHAGENTS_DIR}"
+			&& uv run python -m youtube_music_playlist.render_plists --output "${LAUNCHAGENTS_DIR}"
 	)
 }
 

@@ -14,8 +14,8 @@ import re
 import typing
 from pathlib import Path
 
-from youtube_music_library_radio.logger import create_handler
-from youtube_music_library_radio.settings import Settings, load_settings
+from youtube_music_playlist.logger import create_handler
+from youtube_music_playlist.settings import Settings, load_settings
 
 if typing.TYPE_CHECKING:
     from collections.abc import Sequence
@@ -112,7 +112,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Render every agent plist into the directory `--output` names, and return 0."""
     logging.basicConfig(level=logging.INFO, handlers=[create_handler()])
     parser = argparse.ArgumentParser(
-        prog="python -m youtube_music_library_radio.render_plists",
+        prog="python -m youtube_music_playlist.render_plists",
         description="Write the LaunchAgent plist files from the current settings.",
     )
     _ = parser.add_argument("--output", type=Path, required=True, help="the directory to write each plist into")

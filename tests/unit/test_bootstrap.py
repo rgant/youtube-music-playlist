@@ -1,4 +1,4 @@
-"""Tests for youtube_music_library_radio.bootstrap.
+"""Tests for youtube_music_playlist.bootstrap.
 
 Most tests pass a fake fetch function instead of a mock of `urllib`. That fake answers each call
 from a payload recorded under `tests/fixtures`, or from a small dict built in the test. Two tests,
@@ -24,8 +24,8 @@ from pathlib import Path
 
 import pytest
 
-from youtube_music_library_radio.__main__ import main
-from youtube_music_library_radio.bootstrap import (
+from youtube_music_playlist.__main__ import main
+from youtube_music_playlist.bootstrap import (
     CredentialError,
     _fetch_bytes,
     _http_get_json,
@@ -38,14 +38,14 @@ from youtube_music_library_radio.bootstrap import (
     everything_playlist_ids,
     playlist_video_ids,
 )
-from youtube_music_library_radio.catalogue import count_songs, open_catalogue
+from youtube_music_playlist.catalogue import count_songs, open_catalogue
 
 if typing.TYPE_CHECKING:
     import argparse
     import sqlite3
 
-    from youtube_music_library_radio.bootstrap import _Fetch
-    from youtube_music_library_radio.jsonshape import JSON
+    from youtube_music_playlist.bootstrap import _Fetch
+    from youtube_music_playlist.jsonshape import JSON
 
 _FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 _TOKEN = "fake-access-token"  # noqa: S105 -- a literal for tests, never a real credential
@@ -316,7 +316,7 @@ def test_load_json_object_parses_a_well_formed_file(tmp_path: Path) -> None:
 def test_load_json_object_raises_when_the_top_level_value_is_not_an_object(tmp_path: Path) -> None:
     """`main` reports a `CredentialError` as one log line that names the file.
 
-    A list that reaches the field checks raises `AttributeError` and gives the owner a traceback.
+    A list that reaches the field checks raises `AttributeError` and gives me a traceback.
     """
     path = tmp_path / "oauth.json"
     _ = path.write_text(json.dumps(["not", "an", "object"]), encoding="utf-8")
@@ -336,9 +336,9 @@ def test_require_str_returns_a_present_string_field() -> None:
 
 
 def test_require_str_raises_naming_the_file_and_field_when_missing(tmp_path: Path) -> None:
-    """The owner keeps `oauth.json` and the client secret file side by side.
+    """I keep `oauth.json` and the client secret file side by side.
 
-    A message without the path and the field name leaves the owner to guess which file to correct.
+    A message without the path and the field name leaves me to guess which file to correct.
     """
     path = tmp_path / "oauth.json"
     _ = path.write_text(json.dumps({}), encoding="utf-8")
@@ -380,7 +380,7 @@ def test_require_str_error_never_echoes_the_offending_value(tmp_path: Path) -> N
 def test_require_dict_raises_when_the_field_is_not_an_object(tmp_path: Path) -> None:
     """`access_token` reads `client_id`, `client_secret`, and `token_uri` out of `installed`.
 
-    A string `installed` raises `AttributeError` on the next field read and gives the owner a
+    A string `installed` raises `AttributeError` on the next field read and gives me a
     traceback.
     """
     path = tmp_path / "client_secret.json"
@@ -412,7 +412,7 @@ def test_http_get_json_parses_an_object_body(monkeypatch: pytest.MonkeyPatch) ->
 def test_http_get_json_reports_a_non_object_body_as_a_response_fault(monkeypatch: pytest.MonkeyPatch) -> None:
     """`_http_get_json` raises `RuntimeError` naming the URL when the body is not a JSON object.
 
-    A response body is not a credential. A `CredentialError` here sends the owner to `oauth.json`,
+    A response body is not a credential. A `CredentialError` here sends me to `oauth.json`,
     which is a file with nothing wrong in it.
     """
 
@@ -473,7 +473,7 @@ def test_main_reports_a_malformed_api_response_as_operator_error(
 def test_a_credential_fault_and_a_response_fault_raise_different_types(tmp_path: Path) -> None:
     """A credential file with a missing field raises `CredentialError`. A malformed response raises `RuntimeError`.
 
-    The two faults send the owner to two different places, so they must keep two different types.
+    The two faults send me to two different places, so they must keep two different types.
     `CredentialError` subclasses `TypeError` and stands apart from `RuntimeError` today. If one type
     ever becomes a subclass of the other, each assertion below fails. That change is the one that
     lets the two faults merge again.

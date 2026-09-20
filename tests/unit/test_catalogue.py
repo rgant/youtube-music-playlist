@@ -1,4 +1,4 @@
-"""Tests for youtube_music_library_radio.catalogue.
+"""Tests for youtube_music_playlist.catalogue.
 
 Every test runs against a real temporary SQLite database, never against a double. The `conn` fixture
 in `conftest.py` opens that database and closes it after the test passes or fails.
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from youtube_music_library_radio.catalogue import (
+from youtube_music_playlist.catalogue import (
     PlaylistMembership,
     Song,
     count_songs,
@@ -114,9 +114,9 @@ def test_open_raises_when_the_backend_cannot_use_wal() -> None:
 
 
 def test_merge_adds_new_songs_and_reports_the_count(conn: sqlite3.Connection) -> None:
-    """The return value is what `refresh` and `bootstrap` report to the owner.
+    """The return value is what `refresh` and `bootstrap` report to me.
 
-    That number is what the owner reads as the size of the run.
+    That number is what I read as the size of the run.
     """
     added = merge_songs(conn, [_song("a"), _song("b")])
 
@@ -204,7 +204,7 @@ def test_delete_ignores_a_video_id_absent_from_the_catalogue(conn: sqlite3.Conne
 
 
 def test_delete_counts_a_repeated_video_id_one_time(conn: sqlite3.Connection) -> None:
-    """`refresh` reports this number to the owner as the rows it deleted.
+    """`refresh` reports this number to me as the rows it deleted.
 
     A count of the IDs given, rather than of the rows deleted, overstates the change to the catalogue.
     """
@@ -236,7 +236,7 @@ def test_delete_accepts_more_ids_than_sqlite_allows_host_parameters(conn: sqlite
     """`delete_songs` deletes a list longer than the SQLite cap of 32,766 host parameters per statement.
 
     A `WHERE video_id IN (...)` form binds one host parameter per ID in one statement, and raises
-    `sqlite3.OperationalError` above that cap. The owner's catalogue holds more than 15,000 rows,
+    `sqlite3.OperationalError` above that cap. My catalogue holds more than 15,000 rows,
     so a list that long is realistic.
     """
     _ = merge_songs(conn, [_song("keep"), _song("v00039999")])
@@ -312,7 +312,7 @@ def test_stored_playlists_is_empty_before_any_read(conn: sqlite3.Connection) -> 
 
 
 def test_duplicated_video_ids_finds_a_song_in_two_playlists(conn: sqlite3.Connection) -> None:
-    """`playlists` warns the owner about each song that sits in more than one playlist.
+    """`playlists` warns me about each song that sits in more than one playlist.
 
     A song in one playlist must stay out of that warning, or the warning fires on every run and means nothing.
     """
@@ -338,7 +338,7 @@ _NEW_COLUMNS = (
 def test_open_adds_the_library_columns_to_an_older_database(tmp_path: Path) -> None:
     """A catalogue written before these columns must open and keep every row.
 
-    The owner's catalogue holds thousands of rows and a play history no read can rebuild. A schema
+    My catalogue holds thousands of rows and a play history no read can rebuild. A schema
     change that needs a fresh database throws that away.
     """
     db_path = tmp_path / "catalogue.sqlite3"

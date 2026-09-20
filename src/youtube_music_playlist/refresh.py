@@ -1,6 +1,6 @@
 """Fill the gap between the catalogue and the live YouTube Music library, and keep it current after that.
 
-Task 7's `bootstrap` seeds the catalogue one time from the owner's `Everything N` YouTube playlists,
+Task 7's `bootstrap` seeds the catalogue one time from my `Everything N` YouTube playlists,
 which the YouTube Data API can read cheaply. The library holds more songs than those playlists ever
 held. New songs also arrive after that one-time seed. This module reads the library directly, so it
 covers the songs the playlists missed and the songs that arrive later.
@@ -19,7 +19,7 @@ Browser cookies expire. YouTube answers an expired session with an empty library
 empty read is a broken credential here. `library_songs` raises on that read. Read its docstring for
 the reason.
 
-This module sits off the playback path. The owner runs it by hand, and it is the only part of the
+This module sits off the playback path. I run it by hand, and it is the only part of the
 system that needs a credential. If that credential breaks, `refresh` raises and no new song arrives.
 A player keeps playing from what the catalogue already holds.
 """
@@ -33,14 +33,14 @@ import typing
 from ytmusicapi import YTMusic
 from ytmusicapi.exceptions import YTMusicError
 
-from youtube_music_library_radio.catalogue import Song, count_songs, delete_songs, mark_absent, mark_present, merge_songs
+from youtube_music_playlist.catalogue import Song, count_songs, delete_songs, mark_absent, mark_present, merge_songs
 
 if typing.TYPE_CHECKING:
     import sqlite3
     from collections.abc import Callable
     from pathlib import Path
 
-    from youtube_music_library_radio.jsonshape import JSON
+    from youtube_music_playlist.jsonshape import JSON
 
 _logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ _DEFAULT_MISSING_THRESHOLD = 3
 # A library song whose title holds one of these as a whole word leaves the catalogue. A radio edit
 # and a censored cut both duplicate a song the library already holds in full. Add a lowercase
 # phrase here, and `refresh` deletes the songs it matches on the next run. Keep each pattern narrow.
-# `refresh` lists every song it excludes. The owner reads that list, then widens or narrows a
+# `refresh` lists every song it excludes. I read that list, then widen or narrow a
 # pattern that matches the wrong songs.
 #
 # THE RULE: each pattern must start and end with a letter or a digit. `radio edit` obeys the rule.
@@ -89,7 +89,7 @@ def _compile_matchers(patterns: tuple[str, ...]) -> tuple[tuple[str, re.Pattern[
     refuse to load instead.
 
     `\b` on both ends holds the match to a whole word, so `censored` matches `(Censored)` and leaves
-    `The Uncensored Mix`. An uncensored cut is the full song, which is the song the owner wants to
+    `The Uncensored Mix`. An uncensored cut is the full song, which is the song I want to
     keep. `re.escape` makes each pattern a literal, so a pattern needs no hand-written escaping.
     `re.IGNORECASE` gives the comparison without case.
     """
@@ -137,7 +137,7 @@ type ClientFactory = Callable[[str], LibraryClient]
 class ExcludedSong:
     """One library song that an exclusion pattern matched.
 
-    Carries the artist and the full title, not the video ID alone. The owner reads this listing to
+    Carries the artist and the full title, not the video ID alone. I read this listing to
     judge a pattern, and a video ID alone tells nobody whether the match was right.
     """
 
@@ -341,7 +341,7 @@ def _empty_library_error(headers_path: Path) -> RuntimeError:
 
 
 def library_songs(headers_path: Path, *, client_factory: ClientFactory = YTMusic, limit: int = _LIBRARY_LIMIT) -> LibraryScan:
-    """Read the owner's YouTube Music library. Return the songs to keep and the songs to exclude.
+    """Read my YouTube Music library. Return the songs to keep and the songs to exclude.
 
     Returns the songs and the exclusions together. The caller acts on each one. `refresh` merges
     `songs` and deletes `excluded`. A return of `songs` alone hides the exclusions from every caller.
@@ -361,11 +361,11 @@ def library_songs(headers_path: Path, *, client_factory: ClientFactory = YTMusic
     look the same from here. This project plays a library of about 20,500 songs, so an empty read is
     a broken credential.
 
-    Without this check, `refresh` reports "added 0 rows" against a dead credential and returns 0. The
-    owner then reads that as "the library holds no new songs".
+    Without this check, `refresh` reports "added 0 rows" against a dead credential and returns 0. I
+    then read that as "the library holds no new songs".
 
-    The cost: a library that truly holds no songs also raises. That case cannot happen for this
-    owner. A flag to allow it only adds a way to switch the check off.
+    The cost: a library that truly holds no songs also raises. That case cannot happen for my
+    library. A flag to allow it only adds a way to switch the check off.
     """
     if not headers_path.is_file():
         raise _headers_file_error(headers_path)
@@ -421,14 +421,14 @@ def refresh(
     library lost, once enough trusted reads agree that it is gone.
 
     Logs one INFO line per excluded song, which names the pattern, the video ID, the artist, and the
-    title. The owner reads that listing to confirm that a pattern matches the right songs.
+    title. I read that listing to confirm that a pattern matches the right songs.
 
     Raises `RuntimeError` when the read returns fewer songs than `trust_ratio` of the stored count.
     Presence never changes on that path, so a short read costs a re-run and nothing else. It also
     raises the same `RuntimeError` as `library_songs` for an absent headers file, a rejected one, or
     an empty library read.
 
-    This function never runs on the playback path. The owner runs it by hand. A failure here stops
+    This function never runs on the playback path. I run it by hand. A failure here stops
     new songs from arriving, and never stops the song that plays.
     """
     scan = library_songs(headers_path, client_factory=client_factory)

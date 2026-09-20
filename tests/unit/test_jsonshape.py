@@ -1,4 +1,4 @@
-"""Tests for youtube_music_library_radio.jsonshape.
+"""Tests for youtube_music_playlist.jsonshape.
 
 `bootstrap` and `refresh` both import `JSON` inside `if typing.TYPE_CHECKING:`, because both use it
 in annotations alone. This module imports it at run time instead, which is the one place that proves
@@ -7,7 +7,7 @@ the shared alias resolves outside a type checker.
 
 import typing
 
-from youtube_music_library_radio.jsonshape import JSON
+from youtube_music_playlist.jsonshape import JSON
 
 # The one definition this project accepts for a JSON value, member by member and in order.
 _DEFINITION = "bool | int | float | str | list[JSON] | dict[str, JSON] | None"

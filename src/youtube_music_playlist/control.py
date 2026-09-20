@@ -1,11 +1,11 @@
-"""Command the Sonos speaker: discover it by name, stop it, and read its transport state.
+"""Command the Sonos speaker: discover it by name, stop it, and read what it reports.
 
-This module discovers the speaker, stops it, and reads its transport state. `harvest` reads the
-queue, and `queue` fills it.
+This module discovers the speaker, stops it, reads its transport state, and counts its queue.
+`harvest` reads the queue entries themselves, and `queue` fills the queue.
 
 This module starts no playback. A `STOPPED` transport cannot say whether a person stopped the
 speaker or the source broke. Both look the same from the network. Any rule written against that
-state either fights the owner or goes silent for good. A caller decides what the speaker plays, and
+state either fights me or goes silent for good. A caller decides what the speaker plays, and
 this module carries out that decision alone.
 """
 
@@ -28,8 +28,25 @@ _DISCOVERY_ATTEMPTS = 3
 _DISCOVERY_PAUSE_SECONDS = 3.0
 
 
-class _Speaker(typing.Protocol):
-    """The `soco.SoCo` surface this module calls. A test fake implements only this."""
+# How many queue items `queue_depth` asks the speaker for. The speaker reports the whole count
+# beside any page, so one item carries the answer and a larger page reads hundreds of tracks.
+_DEPTH_PAGE = 1
+
+
+class _QueuePage(typing.Protocol):
+    """The `soco.data_structures.Queue` surface this module reads. A test fake implements only this."""
+
+    @property
+    def total_matches(self) -> int:
+        """The length of the whole queue, and not of this page."""
+        ...  # pragma: no cover -- a Protocol's method body never runs. Only an implementation's body runs
+
+
+class Speaker(typing.Protocol):
+    """The `soco.SoCo` surface this module calls. A test fake implements only this.
+
+    `__main__` names this type, because `find_speaker` hands one speaker on to another module.
+    """
 
     player_name: str
 
@@ -41,8 +58,12 @@ class _Speaker(typing.Protocol):
         """Return transport info, as `soco.SoCo.get_current_transport_info` does."""
         ...  # pragma: no cover -- a Protocol's method body never runs. Only an implementation's body runs
 
+    def get_queue(self, start: int = ..., max_items: int = ...) -> _QueuePage:
+        """Return one page of the queue, as `soco.SoCo.get_queue` does."""
+        ...  # pragma: no cover -- a Protocol's method body never runs. Only an implementation's body runs
 
-def _default_discover() -> Iterable[_Speaker]:
+
+def _default_discover() -> Iterable[Speaker]:
     """Call the real `soco.discover` and turn its `None` (nothing found) into an empty set."""
     return discover() or set()
 
@@ -50,9 +71,9 @@ def _default_discover() -> Iterable[_Speaker]:
 def find_speaker(
     name: str,
     *,
-    discover_fn: Callable[[], Iterable[_Speaker]] = _default_discover,
+    discover_fn: Callable[[], Iterable[Speaker]] = _default_discover,
     sleep_fn: Callable[[float], None] = time.sleep,
-) -> _Speaker:
+) -> Speaker:
     """Discover Sonos speakers on the network and return the one named `name`.
 
     Asks the network `_DISCOVERY_ATTEMPTS` times while it finds nothing at all. A round that
@@ -62,7 +83,7 @@ def find_speaker(
     `name`. Names "none" when discovery finds no speaker at all, so a person reading the error
     knows whether to check the speaker's name or the network.
     """
-    speakers: list[_Speaker] = []
+    speakers: list[Speaker] = []
     for attempt in range(1, _DISCOVERY_ATTEMPTS + 1):
         speakers = list(discover_fn())
         if speakers:
@@ -79,11 +100,21 @@ def find_speaker(
     raise RuntimeError(message)
 
 
-def stop(speaker: _Speaker) -> None:
+def stop(speaker: Speaker) -> None:
     """Stop playback on `speaker`."""
     speaker.stop()
 
 
-def transport_state(speaker: _Speaker) -> str:
+def transport_state(speaker: Speaker) -> str:
     """Return the speaker's current transport state: PLAYING, TRANSITIONING, PAUSED_PLAYBACK, or STOPPED."""
     return speaker.get_current_transport_info()["current_transport_state"]
+
+
+def queue_depth(speaker: Speaker) -> int:
+    """Return how many tracks the speaker's queue holds.
+
+    A power cut resets the speaker and empties the queue. The transport state does not report that,
+    because a speaker with no queue and a speaker I stopped both read STOPPED. This number
+    is the one signal that tells them apart.
+    """
+    return speaker.get_queue(0, _DEPTH_PAGE).total_matches

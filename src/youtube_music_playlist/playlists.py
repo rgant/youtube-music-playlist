@@ -1,4 +1,4 @@
-"""Fill the owner's `Everything N` YouTube playlists with every library song no playlist holds.
+"""Fill my `Everything N` YouTube playlists with every library song no playlist holds.
 
 The playlists are the route into the Sonos queue. A song no playlist holds cannot reach the speaker.
 
@@ -22,13 +22,13 @@ import typing
 if typing.TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
 
-    from youtube_music_library_radio.catalogue import Song
-    from youtube_music_library_radio.jsonshape import JSON
-    from youtube_music_library_radio.refresh import LibraryScan
+    from youtube_music_playlist.catalogue import Song
+    from youtube_music_playlist.jsonshape import JSON
+    from youtube_music_playlist.refresh import LibraryScan
 
 from ytmusicapi.exceptions import YTMusicError
 
-from youtube_music_library_radio.catalogue import PlaylistMembership
+from youtube_music_playlist.catalogue import PlaylistMembership
 
 _logger = logging.getLogger(__name__)
 
@@ -40,8 +40,8 @@ _TITLE = re.compile(r"^Everything (\d+)$")
 # `Everything 8` from one run, and the run then wrote 275 songs those playlists already held.
 _PLAYLIST_LIST_LIMIT = 500
 
-# How many songs one `Everything N` playlist holds. Sonos reads a playlist of this size, and the
-# owner's existing playlists all use it.
+# How many songs one `Everything N` playlist holds. Sonos reads a playlist of this size, and my
+# existing playlists all use it.
 PLAYLIST_SIZE = 500
 
 # How many songs one `add_playlist_items` call carries. YouTube answered a 500-song add with

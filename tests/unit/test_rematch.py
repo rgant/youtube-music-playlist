@@ -1,4 +1,4 @@
-"""Tests for youtube_music_library_radio.rematch.
+"""Tests for youtube_music_playlist.rematch.
 
 `rematch` pairs a library song with a Sonos track the catalogue already observed. It reads the whole
 library, not one playlist, so every test here proves that it refuses an ambiguous key.
@@ -10,8 +10,8 @@ import sqlite3  # noqa: TC003 -- typing.cast reads this name at run time
 import typing
 
 from testdoubles import queue_entry
-from youtube_music_library_radio.catalogue import QueueEntry, Song, merge_songs, pair_sonos_track, record_sonos_track
-from youtube_music_library_radio.rematch import apply_rematch, plan_rematch
+from youtube_music_playlist.catalogue import QueueEntry, Song, merge_songs, pair_sonos_track, record_sonos_track
+from youtube_music_playlist.rematch import apply_rematch, plan_rematch
 
 
 def _song(video_id: str, title: str, artist: str, album: str = "An Album") -> Song:

@@ -1,4 +1,4 @@
-"""Tests for youtube_music_library_radio.queue.
+"""Tests for youtube_music_playlist.queue.
 
 `pick_queue` reads a real temporary catalogue and takes a seeded `random.Random`, so its choice is
 repeatable and its tests need no double. `send_queue` runs against a fake speaker that records every
@@ -13,8 +13,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from soco.exceptions import SoCoUPnPException
 
-from youtube_music_library_radio.catalogue import Song, mark_queued, merge_songs, pair_sonos_track
-from youtube_music_library_radio.queue import (
+from youtube_music_playlist.catalogue import Song, mark_queued, merge_songs, pair_sonos_track
+from youtube_music_playlist.queue import (
     _ADD_ATTEMPTS,
     _ADD_RETRY_SECONDS,
     NotEnoughSongsError,
@@ -69,7 +69,7 @@ def test_pick_queue_takes_a_song_queued_before_the_window(conn: sqlite3.Connecti
 
 
 def test_pick_queue_returns_the_size_asked_for(conn: sqlite3.Connection) -> None:
-    """The owner asks for 500 songs, and a short queue is a silent failure of the whole feature."""
+    """I ask for 500 songs, and a short queue is a silent failure of the whole feature."""
     _paired(conn, 50)
 
     picked = pick_queue(conn, size=20, window_days=7, rng=random.Random(1))
@@ -223,7 +223,7 @@ def test_the_item_names_the_music_service_of_the_uri(conn: sqlite3.Connection) -
 
 
 def test_send_queue_retries_a_track_the_speaker_refused_once(conn: sqlite3.Connection) -> None:
-    """The refusal is transient. A song lost to one of them costs the owner a track it can keep."""
+    """The refusal is transient. A song lost to one of them costs me a track it can keep."""
     _paired(conn, 2)
     songs = pick_queue(conn, size=2, window_days=7, rng=random.Random(1))
     flaky = typing.cast("str", songs[0].sonos_uri)

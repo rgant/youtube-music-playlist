@@ -21,9 +21,9 @@ from pathlib import Path
 from ytmusicapi import YTMusic, setup
 from ytmusicapi.exceptions import YTMusicError
 
-from youtube_music_library_radio.authheaders import CURL_INSTRUCTIONS, MissingHeadersError, normalise
-from youtube_music_library_radio.bootstrap import CredentialError, access_token, bootstrap
-from youtube_music_library_radio.catalogue import (
+from youtube_music_playlist.authheaders import CURL_INSTRUCTIONS, MissingHeadersError, normalise
+from youtube_music_playlist.bootstrap import CredentialError, access_token, bootstrap
+from youtube_music_playlist.catalogue import (
     count_songs,
     duplicated_video_ids,
     mark_queued,
@@ -32,11 +32,11 @@ from youtube_music_library_radio.catalogue import (
     stored_playlists,
     unpaired_songs,
 )
-from youtube_music_library_radio.control import find_speaker, stop, transport_state
-from youtube_music_library_radio.harvest import harvest, read_queue
-from youtube_music_library_radio.logger import create_handler
-from youtube_music_library_radio.notify import notify
-from youtube_music_library_radio.playlists import (
+from youtube_music_playlist.control import find_speaker, queue_depth, stop, transport_state
+from youtube_music_playlist.harvest import harvest, read_queue
+from youtube_music_playlist.logger import create_handler
+from youtube_music_playlist.notify import notify
+from youtube_music_playlist.playlists import (
     PLAYLIST_SIZE,
     apply_plan,
     plan_repeats,
@@ -45,20 +45,21 @@ from youtube_music_library_radio.playlists import (
     require_complete,
     uncovered,
 )
-from youtube_music_library_radio.queue import pick_queue, send_queue
-from youtube_music_library_radio.refresh import library_songs, refresh
-from youtube_music_library_radio.rematch import apply_rematch, plan_rematch
-from youtube_music_library_radio.settings import load_settings
+from youtube_music_playlist.queue import pick_queue, send_queue
+from youtube_music_playlist.refresh import library_songs, refresh
+from youtube_music_playlist.rematch import apply_rematch, plan_rematch
+from youtube_music_playlist.settings import load_settings
 
 if typing.TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from youtube_music_library_radio.catalogue import PlaylistMembership
-    from youtube_music_library_radio.harvest import Speaker as HarvestSpeaker
-    from youtube_music_library_radio.playlists import PlannedWrite, PlaylistClient
-    from youtube_music_library_radio.queue import Speaker as QueueSpeaker
-    from youtube_music_library_radio.refresh import ClientFactory, LibraryScan, RefreshResult
-    from youtube_music_library_radio.settings import Settings
+    from youtube_music_playlist.catalogue import PlaylistMembership
+    from youtube_music_playlist.control import Speaker as ControlSpeaker
+    from youtube_music_playlist.harvest import Speaker as HarvestSpeaker
+    from youtube_music_playlist.playlists import PlannedWrite, PlaylistClient
+    from youtube_music_playlist.queue import Speaker as QueueSpeaker
+    from youtube_music_playlist.refresh import ClientFactory, LibraryScan, RefreshResult
+    from youtube_music_playlist.settings import Settings
 
 _logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ _DEFAULT_HEADERS_PATH = Path("browser.json")
 _AUTH_PROBE_LIMIT = 25
 
 # How many songs `queue` names in the log before it reports a total. A 500-song listing buries the
-# one line the owner wants.
+# one line I want.
 _QUEUE_PREVIEW = 5
 
 
@@ -89,9 +90,14 @@ def _stop_station(settings: Settings) -> None:  # pragma: no cover -- reaches th
     stop(find_speaker(settings.speaker_name))
 
 
-def _speaker_state(settings: Settings) -> str:  # pragma: no cover -- reaches the speaker. A live run proves it
-    """Return the transport state of the speaker named in `settings`."""
-    return transport_state(find_speaker(settings.speaker_name))
+def _speaker_report(settings: Settings) -> tuple[str, int]:  # pragma: no cover -- reaches the speaker. A live run proves it
+    """Return the transport state and the queue depth of the speaker named in `settings`.
+
+    One discovery answers the state read and the depth read. Discovery costs seconds, and a second
+    one can fail on its own.
+    """
+    speaker = find_speaker(settings.speaker_name)
+    return transport_state(speaker), queue_depth(speaker)
 
 
 def _bootstrap(
@@ -100,7 +106,7 @@ def _bootstrap(
     token_fn: Callable[[Path, Path], str] = access_token,
     bootstrap_fn: Callable[[sqlite3.Connection, str], int] = bootstrap,
 ) -> int:
-    """Fill the catalogue from the owner's `Everything N` YouTube playlists."""
+    """Fill the catalogue from my `Everything N` YouTube playlists."""
     oauth_path = typing.cast("Path", args.oauth)
     client_secret_path = typing.cast("Path", args.client_secret)
     settings = load_settings()
@@ -284,11 +290,11 @@ def _playlists(
     many rounds. Gathered together they need one queue read each. That run reads no library, because
     the catalogue already knows which songs carry no pairing.
 
-    Writes nothing without `--commit`. A write reaches the owner's Google account, so a person who
+    Writes nothing without `--commit`. A write reaches my Google account, so a person who
     runs this by mistake must lose nothing.
 
     Records the playlists in the catalogue on a dry run as well. A read of every playlist is the
-    expensive part of this command. The record is worth keeping whatever the owner decides next.
+    expensive part of this command. The record is worth keeping whatever I decide next.
 
     The store, not one read, decides what the playlists hold. `record_playlists` folds this read into
     the accumulated union, and `require_complete` checks that union against the count each playlist
@@ -330,7 +336,7 @@ def _settings_refresh(conn: sqlite3.Connection, headers_path: Path, settings: Se
 def _harvest(args: argparse.Namespace, *, speaker_fn: Callable[[str], object] = find_speaker) -> int:
     """Pair the Sonos queue against one playlist, and store each Sonos track ID.
 
-    The owner adds that playlist to the queue in the Sonos app first. A Sonos track ID exists nowhere
+    I add that playlist to the queue in the Sonos app first. A Sonos track ID exists nowhere
     else, so this read is the only way the catalogue learns it.
 
     Reads the speaker and the catalogue. Writes nothing to YouTube.
@@ -368,16 +374,37 @@ def _rematch(args: argparse.Namespace) -> int:
     return 0
 
 
+def _already_queued(settings: Settings, speaker: object) -> bool:
+    """Report whether the speaker's queue already holds a track. If it does, log the depth."""
+    depth = queue_depth(typing.cast("ControlSpeaker", speaker))
+    if depth == 0:
+        return False
+    _logger.info("the speaker %s holds %d queued tracks, so this run sends nothing", settings.speaker_name, depth)
+    return True
+
+
 def _queue(args: argparse.Namespace, *, speaker_fn: Callable[[str], object] = find_speaker) -> int:
     """Send a random sample of paired songs to the speaker, with no recent repeat.
 
     Writes nothing without `--commit`. A dry run prints the sample and leaves the speaker alone.
 
+    With `--if-empty`, reads the speaker's queue first and returns after a queue that holds a track.
+    The read comes before `pick_queue`, so a skipped run costs no catalogue work and cannot fail on
+    a pool the catalogue cannot fill. A plain run reads no queue, so a dry run still needs no
+    speaker at all.
+
     `last_queued` moves for the songs the speaker took, and for no other. A song marked without a
     send stays out of the next queue and never plays.
+
+    Starts no playback. A filled queue waits for me.
     """
     commit = bool(getattr(args, "commit", False))
     settings = load_settings()
+
+    speaker = speaker_fn(settings.speaker_name) if bool(getattr(args, "if_empty", False)) else None
+    if speaker is not None and _already_queued(settings, speaker):
+        return 0
+
     with contextlib.closing(open_catalogue(settings.database_path)) as conn:
         songs = pick_queue(conn, size=settings.queue_size, window_days=settings.queue_window_days, rng=random.SystemRandom())
         _logger.info("chose %d songs the speaker has not held for %d days", len(songs), settings.queue_window_days)
@@ -390,7 +417,8 @@ def _queue(args: argparse.Namespace, *, speaker_fn: Callable[[str], object] = fi
             _logger.info("this was a dry run and the speaker did not change. Run it again with --commit to send")
             return 0
 
-        speaker = speaker_fn(settings.speaker_name)
+        if speaker is None:
+            speaker = speaker_fn(settings.speaker_name)
         sent = send_queue(typing.cast("QueueSpeaker", speaker), songs)
         mark_queued(conn, [song.video_id for song in sent])
     _logger.info("the speaker %s now holds %d of the %d songs chosen", settings.speaker_name, len(sent), len(songs))
@@ -404,7 +432,7 @@ def _refresh(
 ) -> int:
     """Merge the live YouTube Music library into the catalogue, and delete every excluded song.
 
-    `refresh` logs one line per excluded song. This adds the totals, so the owner sees the size of
+    `refresh` logs one line per excluded song. This adds the totals, so I see the size of
     the exclusion against the size of the catalogue.
     """
     headers_path = typing.cast("Path", args.headers)
@@ -431,11 +459,14 @@ def _stop(args: argparse.Namespace, *, stop_fn: Callable[[Settings], None] = _st
     return 0
 
 
-def _status(args: argparse.Namespace, *, state_fn: Callable[[Settings], str] = _speaker_state) -> int:
-    """Report the catalogue row count and the transport state of the speaker.
+def _status(args: argparse.Namespace, *, report_fn: Callable[[Settings], tuple[str, int]] = _speaker_report) -> int:
+    """Report the catalogue row count, the transport state of the speaker, and its queue depth.
 
-    The row count is local and always available. The transport state needs the speaker on the LAN.
+    The row count is local and always available. The speaker reads need the speaker on the LAN.
     If discovery fails, this reports the row count, names the fault, and returns a non-zero value.
+
+    The queue depth is here because nothing else reports it. A power cut empties the Sonos queue,
+    and the transport state still reads STOPPED, which is what a speaker I stopped reads.
     """
     del args
     settings = load_settings()
@@ -444,11 +475,11 @@ def _status(args: argparse.Namespace, *, state_fn: Callable[[Settings], str] = _
     _logger.info("the catalogue at %s holds %d songs", settings.database_path, total)
 
     try:
-        state = state_fn(settings)
+        state, depth = report_fn(settings)
     except RuntimeError:
         _logger.exception("the speaker is not available")
         return 1
-    _logger.info("the speaker %s reports %s", settings.speaker_name, state)
+    _logger.info("the speaker %s reports %s and holds %d queued tracks", settings.speaker_name, state, depth)
     return 0
 
 
@@ -477,7 +508,7 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="library-radio",
-        description="Keep a catalogue of the owner's YouTube Music library, and command a Sonos speaker.",
+        description="Keep a catalogue of my YouTube Music library, and command a Sonos speaker.",
     )
     # Only `refresh` offers `--notify`, and `main` reads `args.notify` for every subcommand.
     parser.set_defaults(notify=False)
@@ -529,6 +560,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--commit",
         action="store_true",
         help="send the queue to the speaker. Without this flag the command prints the sample and sends nothing",
+    )
+    _ = queue_parser.add_argument(
+        "--if-empty",
+        action="store_true",
+        help="send nothing when the speaker's queue already holds a track. A power cut empties that queue",
     )
 
     refresh_parser = subparsers.add_parser("refresh", help="merge the YouTube Music library into the catalogue")

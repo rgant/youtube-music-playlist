@@ -4,7 +4,7 @@ import threading
 import time
 import typing
 
-from youtube_music_library_radio.catalogue import Song, count_songs, mark_queued, merge_songs, open_catalogue
+from youtube_music_playlist.catalogue import Song, count_songs, mark_queued, merge_songs, open_catalogue
 
 if typing.TYPE_CHECKING:
     import sqlite3

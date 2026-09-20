@@ -1,12 +1,12 @@
-# YouTube Music Library Radio
+# YouTube Music Playlist
 
-Keep a catalogue of the owner's YouTube Music library, and command a Sonos
-speaker from it.
+Keep a catalogue of my YouTube Music library, and command a Sonos speaker from
+it.
 
 ## How it works
 
 - The catalogue is a SQLite database of every song in the library.
-- `bootstrap` seeds it from the owner's `Everything N` YouTube playlists.
+- `bootstrap` seeds it from my `Everything N` YouTube playlists.
 - `refresh` merges the live library into it, and deletes every excluded song.
 - Each row carries the YouTube video ID and the Sonos track ID that plays it.
 - `harvest` learns a Sonos track ID by reading a queue you filled from a
@@ -20,7 +20,7 @@ Google during playback.
 
 ## Risk
 
-`refresh` and `auth` read the library with the owner's browser cookies, through
+`refresh` and `auth` read the library with my browser cookies, through
 `ytmusicapi`. They read the library and move no audio, which is the same action
 the web app performs. `bootstrap` reads the YouTube Data API v3 over OAuth,
 which Google supports.
@@ -144,24 +144,29 @@ that the playlists never held. Run `refresh` again at any time to add new songs.
 
 ## Commands
 
-| Command                   | Purpose                                         |
-| ------------------------- | ----------------------------------------------- |
-| `library-radio bootstrap` | Fill an empty catalogue from the playlists.     |
-| `library-radio auth`      | Write `browser.json` and verify it.             |
-| `library-radio playlists` | Put every uncovered library song in a playlist. |
-| `library-radio harvest`   | Pair the Sonos queue against one playlist.      |
-| `library-radio rematch`   | Pair songs against tracks the catalogue holds.  |
-| `library-radio queue`     | Send a random sample of songs to the speaker.   |
-| `library-radio refresh`   | Merge the live library into the catalogue.      |
-| `library-radio stop`      | Stop the speaker.                               |
-| `library-radio status`    | Report the row count and the transport state.   |
+| Command                   | Purpose                                          |
+| ------------------------- | ------------------------------------------------ |
+| `library-radio bootstrap` | Fill an empty catalogue from the playlists.      |
+| `library-radio auth`      | Write `browser.json` and verify it.              |
+| `library-radio playlists` | Put every uncovered library song in a playlist.  |
+| `library-radio harvest`   | Pair the Sonos queue against one playlist.       |
+| `library-radio rematch`   | Pair songs against tracks the catalogue holds.   |
+| `library-radio queue`     | Send a random sample of songs to the speaker.    |
+| `library-radio refresh`   | Merge the live library into the catalogue.       |
+| `library-radio stop`      | Stop the speaker.                                |
+| `library-radio status`    | Report the row count and what the speaker holds. |
 
 Each command returns 0 after success. Each command returns a non-zero value
 after a failure.
 
 `status` reads the row count from the catalogue, which is always available. It
-then reads the transport state, which needs the speaker on the LAN. If discovery
-fails, `status` still reports the row count and returns a non-zero value.
+then reads the transport state and the queue depth, which need the speaker on
+the LAN. If discovery fails, `status` still reports the row count and returns a
+non-zero value.
+
+The queue depth is there because nothing else reports it. A power cut resets the
+speaker and empties its queue. The transport state then reads `STOPPED`, which
+is what a speaker you stopped yourself also reads.
 
 ## The Sonos queue
 
@@ -259,6 +264,32 @@ song stays eligible for the next queue.
 Each add costs the speaker about 0.6 seconds, so a queue of 500 takes about five
 minutes. `add_multiple_to_queue` is no faster, and one refusal loses the whole
 batch, so this sends one track at a time.
+
+### Refill an empty queue
+
+A power cut resets the speaker and empties its queue. The scheduled fill comes
+on day 1 or day 15, so the speaker can hold nothing for two weeks.
+
+```sh
+uv run library-radio queue --commit --if-empty
+```
+
+`--if-empty` reads the speaker's queue first. If the queue holds a track, the
+command logs the depth and sends nothing. If the queue is empty, the command
+fills it as a plain `--commit` run does. So you can run it at any moment. It
+never drops a track the speaker did not play.
+
+A plain `--commit` run clears whatever the speaker holds. It also moves
+`last_queued` on every song it sends. If you want a new sample, run it. For
+every other case, use `--if-empty`.
+
+Run it on the mini from another machine like this:
+
+```sh
+ssh <mini> '~/Programming/youtube-music-playlist/.venv/bin/library-radio queue --commit --if-empty'
+```
+
+It starts no playback. Press play on the speaker or in the Sonos app.
 
 ## Removed songs
 
@@ -388,11 +419,11 @@ match deletes it.
 
 `refresh` logs one line for each excluded song. The line names the pattern, the
 video ID, the artist, and the title. Read that list after a run. It is the one
-place an over-matching pattern shows itself, and a title such as
-`Censored by the BBC` matches the rule for the wrong reason.
+place an over-matching pattern shows itself, and a title such as `Censored by
+the BBC` matches the rule for the wrong reason.
 
 To change the rule, edit `_EXCLUDED_PATTERNS` in
-`src/youtube_music_library_radio/refresh.py`.
+`src/youtube_music_playlist/refresh.py`.
 
 A deletion is final. The catalogue holds no history.
 
@@ -408,19 +439,19 @@ Copy the database before the first run with a new pattern. See
 
 Every setting reads an environment variable with the `YTM_RADIO_` prefix.
 
-| Variable                      | Default                                                        | Purpose                                                    |
-| ----------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------- |
-| `YTM_RADIO_DATABASE_PATH`     | `~/.local/share/youtube-music-library-radio/catalogue.sqlite3` | The catalogue file.                                        |
-| `YTM_RADIO_SPEAKER_NAME`      | `Kitchen`                                                      | The name of the Sonos speaker.                             |
-| `YTM_RADIO_TRUST_RATIO`       | `0.9`                                                          | How much of the catalogue a read must return.              |
-| `YTM_RADIO_MISSING_THRESHOLD` | `3`                                                            | How many trusted reads remove an absent song.              |
-| `YTM_RADIO_QUEUE_SIZE`        | `500`                                                          | How many songs one Sonos queue holds.                      |
-| `YTM_RADIO_QUEUE_WINDOW_DAYS` | `7`                                                            | How long a queued song stays out of the next.              |
-| `YTM_RADIO_REFRESH_HOUR`      | `4`                                                            | The hour the LaunchAgent runs `refresh`.                   |
-| `YTM_RADIO_REFRESH_MINUTE`    | `0`                                                            | The minute the LaunchAgent runs `refresh`.                 |
-| `YTM_RADIO_QUEUE_HOUR`        | `5`                                                            | The hour the LaunchAgent runs `queue --commit`.            |
-| `YTM_RADIO_QUEUE_MINUTE`      | `0`                                                            | The minute the LaunchAgent runs `queue --commit`.          |
-| `YTM_RADIO_HARVEST_TOLERANCE` | `25`                                                           | How far the queue length can sit from the playlist length. |
+| Variable                      | Default                                                   | Purpose                                                    |
+| ----------------------------- | --------------------------------------------------------- | ---------------------------------------------------------- |
+| `YTM_RADIO_DATABASE_PATH`     | `~/.local/share/youtube-music-playlist/catalogue.sqlite3` | The catalogue file.                                        |
+| `YTM_RADIO_SPEAKER_NAME`      | `Kitchen`                                                 | The name of the Sonos speaker.                             |
+| `YTM_RADIO_TRUST_RATIO`       | `0.9`                                                     | How much of the catalogue a read must return.              |
+| `YTM_RADIO_MISSING_THRESHOLD` | `3`                                                       | How many trusted reads remove an absent song.              |
+| `YTM_RADIO_QUEUE_SIZE`        | `500`                                                     | How many songs one Sonos queue holds.                      |
+| `YTM_RADIO_QUEUE_WINDOW_DAYS` | `7`                                                       | How long a queued song stays out of the next.              |
+| `YTM_RADIO_REFRESH_HOUR`      | `4`                                                       | The hour the LaunchAgent runs `refresh`.                   |
+| `YTM_RADIO_REFRESH_MINUTE`    | `0`                                                       | The minute the LaunchAgent runs `refresh`.                 |
+| `YTM_RADIO_QUEUE_HOUR`        | `5`                                                       | The hour the LaunchAgent runs `queue --commit`.            |
+| `YTM_RADIO_QUEUE_MINUTE`      | `0`                                                       | The minute the LaunchAgent runs `queue --commit`.          |
+| `YTM_RADIO_HARVEST_TOLERANCE` | `25`                                                      | How far the queue length can sit from the playlist length. |
 
 `YTM_RADIO_QUEUE_WINDOW_DAYS` sets the window `catalogue.queueable_songs`
 excludes. A value of zero excludes nothing.
@@ -455,7 +486,7 @@ catalogue in one direction only, at setup time.
 To move a catalogue, write a single-file snapshot and copy that file:
 
 ```sh
-sqlite3 ~/.local/share/youtube-music-library-radio/catalogue.sqlite3 \
+sqlite3 ~/.local/share/youtube-music-playlist/catalogue.sqlite3 \
   "VACUUM INTO '/tmp/catalogue-snapshot.sqlite3'"
 ```
 
@@ -488,10 +519,15 @@ Each command below runs on the mini, except the `scp` lines.
 The clone uses the HTTPS URL, because the repository is public. The mini needs
 no GitHub key, and it never pushes.
 
+The clone directory carries the name of the repository,
+`youtube-music-playlist`. The catalogue directory carries the name of the
+project, `youtube-music-playlist`. The two names differ, and every path below
+uses the right one.
+
 ```sh
 git clone https://github.com/rgant/youtube-music-playlist.git \
-  ~/Programming/youtube-music-library-radio
-cd ~/Programming/youtube-music-library-radio
+  ~/Programming/youtube-music-playlist
+cd ~/Programming/youtube-music-playlist
 brew install uv just    # the two tools the runtime needs
 uv sync                 # Python 3.14 and the dependencies
 ```
@@ -511,7 +547,7 @@ clone carries none of them.
 
 ```sh
 scp oauth.json client_secret.apps.googleusercontent.com.json browser.json \
-  <mini>:Programming/youtube-music-library-radio/
+  <mini>:Programming/youtube-music-playlist/
 ```
 
 CAUTION: `browser.json` holds live Google account cookies. Copy it over your own
@@ -526,7 +562,7 @@ Make the directory on the mini before the copy. `scp` refuses a target directory
 that is absent.
 
 ```sh
-mkdir -p ~/.local/share/youtube-music-library-radio
+mkdir -p ~/.local/share/youtube-music-playlist
 ```
 
 Archive the laptop catalogue after the move. One machine owns it. Two copies
@@ -544,8 +580,8 @@ just agents-notify-test        # show one banner, then grant permission
 ```
 
 `status` reports the row count first, then the transport state. If it names the
-speaker, the firewall already accepts the interpreter. If it reports
-`Discovery found: none`, read
+speaker, the firewall already accepts the interpreter. If it reports `Discovery
+found: none`, read
 [Sonos discovery and the macOS firewall](#sonos-discovery-and-the-macos-firewall).
 
 Answer the notification prompt that `just agents-notify-test` raises. macOS asks
@@ -562,9 +598,9 @@ both of these conditions:
 - The binary carries a code signature.
 - The binary sits on the firewall allow list.
 
-Either one alone fails. The failure looks like
-`RuntimeError: no speaker named 'Kitchen' found. Discovery found: none`, and
-`curl http://<speaker>:1400/status/zp` still answers `200`. The firewall gates
+Either one alone fails. The failure looks like `RuntimeError: no speaker named
+'Kitchen' found. Discovery found: none`, and `curl
+http://<speaker>:1400/status/zp` still answers `200`. The firewall gates
 incoming connections alone.
 
 `pyproject.toml` sets `python-preference = "only-managed"` for the first
@@ -628,18 +664,19 @@ the `logs` directory beside the catalogue.
 
 `<catalogue>` below is the directory that holds `catalogue.sqlite3`.
 
-| Need                     | Command                                        |
-| ------------------------ | ---------------------------------------------- |
-| Deploy a new commit      | `just deploy-update`                           |
-| Report the loaded agents | `just agents-status`                           |
-| Run `refresh` now        | `just agents-kick`                             |
-| Send a queue now         | `just agents-kick queue`                       |
-| Test the failure banner  | `just agents-notify-test`                      |
-| Read a log               | `tail -f <catalogue>/logs/refresh.stderr.log`  |
-| Stop every agent         | `bash scripts/install_launchagents.sh --stop`  |
-| Start every agent        | `bash scripts/install_launchagents.sh --start` |
-| Remove every agent       | `just uninstall-agents`                        |
-| Send a Sonos queue       | `uv run library-radio queue --commit`          |
+| Need                     | Command                                          |
+| ------------------------ | ------------------------------------------------ |
+| Deploy a new commit      | `just deploy-update`                             |
+| Report the loaded agents | `just agents-status`                             |
+| Run `refresh` now        | `just agents-kick`                               |
+| Send a queue now         | `just agents-kick queue`                         |
+| Test the failure banner  | `just agents-notify-test`                        |
+| Refill an empty queue    | `uv run library-radio queue --commit --if-empty` |
+| Read a log               | `tail -f <catalogue>/logs/refresh.stderr.log`    |
+| Stop every agent         | `bash scripts/install_launchagents.sh --stop`    |
+| Start every agent        | `bash scripts/install_launchagents.sh --start`   |
+| Remove every agent       | `just uninstall-agents`                          |
+| Send a Sonos queue       | `uv run library-radio queue --commit`            |
 
 Run the script directly for `--stop` and `--start`. A deploy that moves the
 catalogue must stop every agent first, and not write underneath a run.
@@ -655,6 +692,10 @@ raises an alarm on another machine. Browser cookies expire after some months,
 and `queue` keeps working from the paired songs. So a missed banner shows itself
 as "no new songs" alone. If a month passes with no new song, read
 `refresh.stderr.log`. See [Expired browser cookies](#expired-browser-cookies).
+
+A power cut empties the Sonos queue, and no agent reads that queue. The speaker
+then holds nothing until day 1 or day 15. Run
+[Refill an empty queue](#refill-an-empty-queue) after a power cut.
 
 `auth` needs Chrome and the clipboard. A headless mini has neither. Run `auth`
 on the laptop and copy the new `browser.json`. Or write the cURL capture to a

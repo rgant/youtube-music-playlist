@@ -1,4 +1,4 @@
-"""Tests for youtube_music_library_radio.authheaders.
+"""Tests for youtube_music_playlist.authheaders.
 
 The tests use invented cookie values. No real credential belongs in this file, or in any file this
 project tracks.
@@ -6,7 +6,7 @@ project tracks.
 
 import pytest
 
-from youtube_music_library_radio.authheaders import CURL_INSTRUCTIONS, MissingHeadersError, normalise, parse_curl
+from youtube_music_playlist.authheaders import CURL_INSTRUCTIONS, MissingHeadersError, normalise, parse_curl
 
 _CURL = """curl --url 'https://music.youtube.com/youtubei/v1/browse?prettyPrint=false' \\
   -H 'accept: */*' \\

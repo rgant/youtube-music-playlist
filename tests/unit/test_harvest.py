@@ -1,4 +1,4 @@
-"""Tests for youtube_music_library_radio.harvest.
+"""Tests for youtube_music_playlist.harvest.
 
 `match` takes no speaker and no database. Every test here is a pure call. The logic that decides
 which Sonos track a song plays as therefore runs with no double of any kind.
@@ -11,8 +11,8 @@ import typing
 import pytest
 
 from testdoubles import queue_entry
-from youtube_music_library_radio.catalogue import PlaylistMembership, Song, merge_songs, record_playlists, songs_by_video_id
-from youtube_music_library_radio.harvest import HarvestError, harvest, match, read_queue
+from youtube_music_playlist.catalogue import PlaylistMembership, Song, merge_songs, record_playlists, songs_by_video_id
+from youtube_music_playlist.harvest import HarvestError, harvest, match, read_queue
 
 if typing.TYPE_CHECKING:
     import sqlite3
@@ -239,7 +239,7 @@ def test_harvest_refuses_a_queue_of_the_wrong_size(conn: sqlite3.Connection) -> 
 
 
 def test_a_second_harvest_changes_nothing(conn: sqlite3.Connection) -> None:
-    """A repeat run must be safe. The owner re-queues a playlist for other reasons."""
+    """A repeat run must be safe. I re-queue a playlist for other reasons."""
     _seed_playlist(conn, [Song(video_id="V1", title="A Song", artist="A Band", album="An Album", duration_seconds=200)])
     speaker = _FakeSpeaker([_row("S1", "A Song", "A Band")])
 

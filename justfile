@@ -1,4 +1,4 @@
-# youtube-music-library-radio task runner
+# youtube-music-playlist task runner
 # Run `just --list` to see all available recipes
 
 # Recipe arguments reach the shell as $1, $2, and so on. Without this, just joins them into one

@@ -2,7 +2,7 @@
 
 A Sonos queue entry carries a title, an artist, an album, a duration, and an opaque track ID. It
 carries no YouTube video ID, and the ID encodes none. So the pairing must be observed, and the only
-place to observe it is a queue the owner filled from one `Everything N` playlist.
+place to observe it is a queue I filled from one `Everything N` playlist.
 
 Sonos does not preserve playlist order, so position tells nothing. The candidate pool is what makes
 the match safe: one playlist holds about 500 songs, and a title repeat inside 500 songs does not
@@ -21,7 +21,7 @@ import logging
 import typing
 from datetime import UTC, datetime
 
-from youtube_music_library_radio.catalogue import (
+from youtube_music_playlist.catalogue import (
     QueueEntry,
     pair_sonos_track,
     record_sonos_track,
@@ -47,7 +47,7 @@ if typing.TYPE_CHECKING:
     import sqlite3
     from collections.abc import Iterable, Sequence
 
-    from youtube_music_library_radio.catalogue import Song
+    from youtube_music_playlist.catalogue import Song
 
 _logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ class MatchResult:
     """What one match run decided.
 
     `pairs` holds `(track_id, video_id)` for each entry it placed. `unplaced` holds every entry it
-    refused to place, so the owner sees exactly what the run left unidentified.
+    refused to place, so I see exactly what the run left unidentified.
     """
 
     pairs: tuple[tuple[str, str], ...]
@@ -210,7 +210,7 @@ def _keys_for(entry: QueueEntry, lookups: Sequence[dict[tuple[str, ...], list[st
 def match(entries: Sequence[QueueEntry], candidates: Sequence[Song]) -> MatchResult:
     """Pair each queue entry with one candidate song. This function is pure and reaches nothing.
 
-    `candidates` must be the songs of the one playlist the owner queued. A wider pool brings back
+    `candidates` must be the songs of the one playlist I queued. A wider pool brings back
     the collisions that the per-playlist pool removes.
 
     Runs these tiers in order, and stops at the first that names exactly one free candidate:

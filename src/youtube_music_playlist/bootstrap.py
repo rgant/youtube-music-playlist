@@ -1,6 +1,6 @@
-"""Fill an empty catalogue for the first time, from the owner's "Everything N" YouTube playlists.
+"""Fill an empty catalogue for the first time, from my "Everything N" YouTube playlists.
 
-The owner's account holds every library song's video ID, across playlists named `Everything 1` and
+My account holds every library song's video ID, across playlists named `Everything 1` and
 up. The YouTube Data API cannot read the YouTube Music library, and these playlists carry the video
 IDs it can read cheaply. One full read costs about 354 quota units.
 
@@ -19,7 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from youtube_music_library_radio.catalogue import Song, merge_songs
+from youtube_music_playlist.catalogue import Song, merge_songs
 
 if typing.TYPE_CHECKING:
     import http.client
@@ -27,7 +27,7 @@ if typing.TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from pathlib import Path
 
-    from youtube_music_library_radio.jsonshape import JSON
+    from youtube_music_playlist.jsonshape import JSON
 
 _logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ _PLAYLIST_ITEMS_URL = "https://www.googleapis.com/youtube/v3/playlistItems"
 _PAGE_SIZE = 50
 
 # The trailing space is the point. A bare "Everything" prefix also matches "EverythingElse".
-# The owner's playlists are "Everything 1" through "Everything 33".
+# My playlists are "Everything 1" through "Everything 33".
 _EVERYTHING_PREFIX = "Everything "
 
 # One JSON fetch of one URL, as `_paginate` and every public function below take it.
@@ -49,12 +49,12 @@ class CredentialError(TypeError):
     """A credential file holds the wrong shape: a missing field, or a field of the wrong type.
 
     Subclasses `TypeError` because ruff TRY004 asks for a `TypeError` after a failed type check. A
-    dedicated class lets the command line report this fault to the owner as operator error. A catch
+    dedicated class lets the command line report this fault to me as operator error. A catch
     of the builtin `TypeError` also catches a programming error in any caller, and reports that bug
-    to the owner as operator error too.
+    to me as operator error too.
 
     Never raised for an API response. A response that changes shape is not a credential fault, and
-    a message about `oauth.json` sends the owner to a file that is correct. The API path raises
+    a message about `oauth.json` sends me to a file that is correct. The API path raises
     `RuntimeError`, which `__main__._EXPECTED_FAILURES` also names.
     """
 
@@ -144,7 +144,7 @@ def _require_object(value: JSON, field: str, *, source: Path | str, error: type[
     """Return `value` as a JSON object. Raises `error` naming `source` and `field` for any other type.
 
     `error` has no default anywhere in this module. A default is how one fault becomes the other. An
-    omitted argument then decides which fault the owner reads about, and sends them to the wrong
+    omitted argument then decides which fault I read about, and sends me to the wrong
     file.
     """
     if not isinstance(value, dict):
@@ -255,7 +255,7 @@ def _paginate(base_url: str, params: dict[str, str], token: str, fetch: _Fetch) 
 def everything_playlist_ids(token: str, *, fetch: _Fetch = _http_get_json) -> list[str]:
     """Return the playlistId of every playlist whose title starts with "Everything " (word and space).
 
-    The owner's playlists are named `Everything 1` through `Everything 33`. A title such as
+    My playlists are named `Everything 1` through `Everything 33`. A title such as
     `EverythingElse` does not start with `Everything ` and is excluded.
 
     Raises `RuntimeError` naming the endpoint and the field for an item with no `snippet`, no
